@@ -1,0 +1,80 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to release (e.g. v1.2.3). Must already match package.json version."
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  build-macos-arm64:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Resolve release tag
+        id: tag
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "tag=${{ github.event.inputs.tag }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Verify package.json version matches tag
+        run: |
+          PKG_VERSION="$(node -p "require('./package.json').version")"
+          TAG="${{ steps.tag.outputs.tag }}"
+          EXPECTED="v${PKG_VERSION}"
+          if [ "$TAG" != "$EXPECTED" ]; then
+            echo "::error::Tag $TAG does not match package.json version ($EXPECTED). Bump package.json before tagging."
+            exit 1
+          fi
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Build icons
+        run: bun run icons
+
+      - name: Build stable bundle
+        run: bun run build
+
+      - name: Verify required artifacts exist
+        run: |
+          ls -la artifacts/
+          for f in \
+            artifacts/stable-macos-arm64-update.json \
+            artifacts/stable-macos-arm64-*.tar.zst \
+            artifacts/stable-macos-arm64-*.dmg; do
+            if ! ls $f >/dev/null 2>&1; then
+              echo "::error::Missing required artifact matching: $f"
+              exit 1
+            fi
+          done
+
+      - name: Create / update GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.tag.outputs.tag }}
+          name: ${{ steps.tag.outputs.tag }}
+          generate_release_notes: true
+          # .patch files are only emitted on releases after the first one, so
+          # we let the glob silently no-op rather than failing the build.
+          fail_on_unmatched_files: false
+          files: |
+            artifacts/stable-macos-arm64-update.json
+            artifacts/stable-macos-arm64-*.tar.zst
+            artifacts/stable-macos-arm64-*.dmg
+            artifacts/stable-macos-arm64-*.patch

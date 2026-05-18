@@ -1,6 +1,6 @@
 import { BrowserView, BrowserWindow, Updater } from "electrobun/bun";
 import type { Subprocess } from "bun";
-import type { JigglerRPC, JigglerStatus } from "../shared/types";
+import type { AppInfo, JigglerRPC, JigglerStatus, UpdatePhase } from "../shared/types";
 
 const DEV_SERVER_PORT = 5173;
 const DEV_SERVER_URL = `http://localhost:${DEV_SERVER_PORT}`;
@@ -9,6 +9,7 @@ const MIN_DELAY_MS = 90 * 1000;
 const MAX_DELAY_MS = 180 * 1000;
 const IDLE_THRESHOLD_MS = 2 * 60 * 1000;
 const TAB_COUNT_CHOICES = [2, 4, 6] as const;
+const UPDATE_CHECK_INTERVAL_MS = 60 * 60 * 1000;
 
 let caffeinate: Subprocess | null = null;
 let nextTimer: ReturnType<typeof setTimeout> | null = null;
@@ -21,11 +22,35 @@ const status: JigglerStatus = {
 	actionCount: 0,
 };
 
+const appInfo: AppInfo = {
+	version: "",
+	channel: "",
+	updateAvailable: false,
+	updateReady: false,
+	updatePhase: "idle",
+	updateProgress: null,
+	availableVersion: null,
+	error: null,
+};
+
 function pushStatus() {
 	const rpc = mainWindow?.webview.rpc as
 		| { send: { statusChanged: (s: JigglerStatus) => void } }
 		| undefined;
 	rpc?.send.statusChanged({ ...status });
+}
+
+function pushAppInfo() {
+	const rpc = mainWindow?.webview.rpc as
+		| { send: { appInfoChanged: (i: AppInfo) => void } }
+		| undefined;
+	rpc?.send.appInfoChanged({ ...appInfo });
+}
+
+function setUpdatePhase(phase: UpdatePhase, extra?: Partial<AppInfo>) {
+	appInfo.updatePhase = phase;
+	if (extra) Object.assign(appInfo, extra);
+	pushAppInfo();
 }
 
 function randomDelay() {
@@ -166,16 +191,85 @@ async function triggerNow(): Promise<JigglerStatus> {
 	return { ...status };
 }
 
+let updateCheckInFlight: Promise<void> | null = null;
+
+async function runUpdateCycle(): Promise<void> {
+	if (updateCheckInFlight) return updateCheckInFlight;
+	if (appInfo.channel === "dev") return;
+	updateCheckInFlight = (async () => {
+		setUpdatePhase("checking", { error: null });
+		try {
+			const check = await Updater.checkForUpdate();
+			if (check.error) {
+				setUpdatePhase("error", { error: check.error });
+				return;
+			}
+			appInfo.availableVersion = check.version || null;
+			if (!check.updateAvailable) {
+				setUpdatePhase("idle", { updateAvailable: false });
+				return;
+			}
+			setUpdatePhase("downloading", {
+				updateAvailable: true,
+				updateProgress: 0,
+			});
+			await Updater.downloadUpdate();
+			const after = Updater.updateInfo();
+			if (after?.updateReady) {
+				setUpdatePhase("ready", {
+					updateReady: true,
+					updateProgress: 100,
+				});
+			} else {
+				setUpdatePhase("error", {
+					error: after?.error || "Download did not produce a ready update",
+				});
+			}
+		} catch (err) {
+			setUpdatePhase("error", { error: (err as Error).message });
+		}
+	})();
+	try {
+		await updateCheckInFlight;
+	} finally {
+		updateCheckInFlight = null;
+	}
+}
+
+Updater.onStatusChange((entry) => {
+	if (entry.status === "download-progress" && entry.details?.progress != null) {
+		appInfo.updateProgress = entry.details.progress;
+		pushAppInfo();
+	}
+});
+
 const rpc = BrowserView.defineRPC<JigglerRPC>({
 	handlers: {
 		requests: {
 			setEnabled: ({ enabled }) => setEnabled(enabled),
 			getStatus: () => ({ ...status }),
 			triggerNow: () => triggerNow(),
+			getAppInfo: () => ({ ...appInfo }),
+			checkForUpdate: async () => {
+				await runUpdateCycle();
+				return { ...appInfo };
+			},
+			applyUpdate: async () => {
+				if (appInfo.updateReady) await Updater.applyUpdate();
+			},
 		},
 		messages: {},
 	},
 });
+
+async function loadAppInfo() {
+	try {
+		appInfo.version = await Updater.localInfo.version();
+		appInfo.channel = await Updater.localInfo.channel();
+	} catch (err) {
+		console.error("Failed to read local app info:", err);
+	}
+}
 
 async function getMainViewUrl(): Promise<string> {
 	const channel = await Updater.localInfo.channel();
@@ -221,3 +315,16 @@ mainWindow = new BrowserWindow({
 process.on("exit", () => stopCaffeinate());
 
 console.log("Focus Timer started");
+
+await loadAppInfo();
+pushAppInfo();
+
+if (appInfo.channel !== "dev") {
+	// Kick off an initial check shortly after launch so we don't slow startup.
+	setTimeout(() => {
+		void runUpdateCycle();
+	}, 5_000);
+	setInterval(() => {
+		if (!appInfo.updateReady) void runUpdateCycle();
+	}, UPDATE_CHECK_INTERVAL_MS);
+}

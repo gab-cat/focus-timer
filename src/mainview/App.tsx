@@ -1,6 +1,26 @@
 import { useEffect, useState } from "react";
-import type { JigglerStatus } from "../shared/types";
-import { getStatus, onStatus, setEnabled, triggerNow } from "./rpc";
+import type { AppInfo, JigglerStatus } from "../shared/types";
+import {
+	applyUpdate,
+	checkForUpdate,
+	getAppInfo,
+	getStatus,
+	onAppInfo,
+	onStatus,
+	setEnabled,
+	triggerNow,
+} from "./rpc";
+
+const INITIAL_APP_INFO: AppInfo = {
+	version: "",
+	channel: "",
+	updateAvailable: false,
+	updateReady: false,
+	updatePhase: "idle",
+	updateProgress: null,
+	availableVersion: null,
+	error: null,
+};
 
 function mmss(ms: number) {
 	const total = Math.max(0, Math.round(ms / 1000));
@@ -18,6 +38,77 @@ function relative(ts: number | null) {
 	return `${m}m ${s}s ago`;
 }
 
+function VersionLine({ info }: { info: AppInfo }) {
+	const [restarting, setRestarting] = useState(false);
+	const [checking, setChecking] = useState(false);
+
+	const channelSuffix =
+		info.channel && info.channel !== "stable" ? ` · ${info.channel}` : "";
+	const versionText = info.version ? `v${info.version}${channelSuffix}` : "—";
+
+	async function restart() {
+		setRestarting(true);
+		try {
+			await applyUpdate();
+		} catch {
+			setRestarting(false);
+		}
+	}
+
+	async function check() {
+		setChecking(true);
+		try {
+			await checkForUpdate();
+		} finally {
+			setChecking(false);
+		}
+	}
+
+	let right: React.ReactNode = (
+		<button
+			onClick={check}
+			disabled={checking || info.updatePhase === "checking" || info.updatePhase === "downloading"}
+			className="text-[10px] uppercase tracking-[0.18em] text-neutral-600 hover:text-neutral-400 transition-colors disabled:opacity-40"
+		>
+			{info.updatePhase === "checking"
+				? "Checking…"
+				: info.updatePhase === "downloading"
+				? `Downloading${info.updateProgress != null ? ` ${info.updateProgress}%` : "…"}`
+				: "Check for updates"}
+		</button>
+	);
+
+	if (info.updateReady) {
+		right = (
+			<button
+				onClick={restart}
+				disabled={restarting}
+				className="text-[10px] uppercase tracking-[0.18em] text-emerald-400 hover:text-emerald-300 transition-colors disabled:opacity-40"
+			>
+				{restarting ? "Restarting…" : `Restart to install${info.availableVersion ? ` v${info.availableVersion}` : ""}`}
+			</button>
+		);
+	} else if (info.updatePhase === "error" && info.error) {
+		right = (
+			<button
+				onClick={check}
+				disabled={checking}
+				title={info.error}
+				className="text-[10px] uppercase tracking-[0.18em] text-amber-500 hover:text-amber-400 transition-colors disabled:opacity-40"
+			>
+				Update failed · Retry
+			</button>
+		);
+	}
+
+	return (
+		<div className="flex items-center justify-between pt-1">
+			<span className="text-[10px] font-mono text-neutral-600">{versionText}</span>
+			{right}
+		</div>
+	);
+}
+
 function App() {
 	const [status, setStatus] = useState<JigglerStatus>({
 		enabled: false,
@@ -27,14 +118,18 @@ function App() {
 	});
 	const [busy, setBusy] = useState(false);
 	const [triggering, setTriggering] = useState(false);
+	const [appInfo, setAppInfo] = useState<AppInfo>(INITIAL_APP_INFO);
 	const [, force] = useState(0);
 
 	useEffect(() => {
 		getStatus().then(setStatus).catch(() => {});
-		const off = onStatus(setStatus);
+		getAppInfo().then(setAppInfo).catch(() => {});
+		const offStatus = onStatus(setStatus);
+		const offAppInfo = onAppInfo(setAppInfo);
 		const tick = setInterval(() => force((n) => n + 1), 1000);
 		return () => {
-			off();
+			offStatus();
+			offAppInfo();
 			clearInterval(tick);
 		};
 	}, []);
@@ -113,6 +208,7 @@ function App() {
 				>
 					{triggering ? "Refreshing…" : "Refresh Now"}
 				</button>
+				<VersionLine info={appInfo} />
 			</footer>
 		</div>
 	);
