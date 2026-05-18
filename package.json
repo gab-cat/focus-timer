@@ -1,0 +1,32 @@
+{
+	"name": "focus-timer",
+	"version": "1.0.0",
+	"description": "Focus Timer — keeps your Mac awake during deep work sessions",
+	"scripts": {
+		"icons": "bun run scripts/build-icons.ts",
+		"start": "vite build && electrobun dev",
+		"dev": "electrobun dev --watch",
+		"dev:hmr": "concurrently \"bun run hmr\" \"bun run start\"",
+		"hmr": "vite --port 5173",
+		"prebuild:canary": "bun run icons",
+		"build:canary": "vite build && electrobun build --env=canary"
+	},
+	"dependencies": {
+		"electrobun": "1.18.1",
+		"react": "^18.3.1",
+		"react-dom": "^18.3.1"
+	},
+	"devDependencies": {
+		"@types/bun": "latest",
+		"@types/react": "^18.3.12",
+		"@types/react-dom": "^18.3.1",
+		"@vitejs/plugin-react": "^4.3.4",
+		"autoprefixer": "^10.4.20",
+		"concurrently": "^9.1.0",
+		"postcss": "^8.4.49",
+		"sharp": "^0.34.5",
+		"tailwindcss": "^3.4.16",
+		"typescript": "^5.7.2",
+		"vite": "^6.0.3"
+	}
+}
