@@ -1,11 +1,21 @@
 import { Electroview } from "electrobun/view";
-import type { AppInfo, JigglerRPC, JigglerStatus } from "../shared/types";
+import type {
+	AppInfo,
+	JigglerRPC,
+	JigglerStatus,
+	Settings,
+	Stats,
+} from "../shared/types";
 
 type StatusListener = (s: JigglerStatus) => void;
 type AppInfoListener = (i: AppInfo) => void;
+type SettingsListener = (s: Settings) => void;
+type StatsListener = (s: Stats) => void;
 
 const statusListeners = new Set<StatusListener>();
 const appInfoListeners = new Set<AppInfoListener>();
+const settingsListeners = new Set<SettingsListener>();
+const statsListeners = new Set<StatsListener>();
 
 export function onStatus(fn: StatusListener) {
 	statusListeners.add(fn);
@@ -17,6 +27,16 @@ export function onAppInfo(fn: AppInfoListener) {
 	return () => appInfoListeners.delete(fn);
 }
 
+export function onSettings(fn: SettingsListener) {
+	settingsListeners.add(fn);
+	return () => settingsListeners.delete(fn);
+}
+
+export function onStats(fn: StatsListener) {
+	statsListeners.add(fn);
+	return () => statsListeners.delete(fn);
+}
+
 const rpc = Electroview.defineRPC<JigglerRPC>({
 	handlers: {
 		requests: {},
@@ -26,6 +46,12 @@ const rpc = Electroview.defineRPC<JigglerRPC>({
 			},
 			appInfoChanged: (i) => {
 				for (const fn of appInfoListeners) fn(i);
+			},
+			settingsChanged: (s) => {
+				for (const fn of settingsListeners) fn(s);
+			},
+			statsChanged: (s) => {
+				for (const fn of statsListeners) fn(s);
 			},
 		},
 	},
@@ -55,4 +81,20 @@ export async function checkForUpdate(): Promise<AppInfo> {
 
 export async function applyUpdate(): Promise<void> {
 	return electroview.rpc!.request.applyUpdate({});
+}
+
+export async function getSettings(): Promise<Settings> {
+	return electroview.rpc!.request.getSettings({});
+}
+
+export async function updateSettings(patch: Partial<Settings>): Promise<Settings> {
+	return electroview.rpc!.request.updateSettings(patch);
+}
+
+export async function getStats(): Promise<Stats> {
+	return electroview.rpc!.request.getStats({});
+}
+
+export async function resetStats(): Promise<Stats> {
+	return electroview.rpc!.request.resetStats({});
 }
