@@ -14,6 +14,13 @@ export default {
 		// redirects to the newest release's asset of that name.
 		baseUrl: "https://github.com/gab-cat/focus-timer/releases/latest/download",
 	},
+	scripts: {
+		// Runs after the DMG wrapper bundle is built, before the DMG is created.
+		// Ad-hoc signs the wrapper so Gatekeeper shows "unidentified developer"
+		// instead of "damaged". Update tarballs stay unsigned — the Updater
+		// strips com.apple.quarantine on replace, so they don't need it.
+		postWrap: "scripts/post-wrap-sign.ts",
+	},
 	build: {
 		// Vite builds to dist/, we copy from there
 		copy: {
