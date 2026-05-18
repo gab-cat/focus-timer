@@ -7,6 +7,8 @@ const DEV_SERVER_URL = `http://localhost:${DEV_SERVER_PORT}`;
 
 const MIN_DELAY_MS = 90 * 1000;
 const MAX_DELAY_MS = 180 * 1000;
+const IDLE_THRESHOLD_MS = 2 * 60 * 1000;
+const TAB_COUNT_CHOICES = [2, 4, 6] as const;
 
 let caffeinate: Subprocess | null = null;
 let nextTimer: ReturnType<typeof setTimeout> | null = null;
@@ -35,13 +37,30 @@ async function runShell(cmd: string[]) {
 	await proc.exited;
 }
 
-// Move the cursor with a few small human-ish eased steps, then press Cmd+Tab twice.
-async function performJiggle() {
+async function runShellOutput(cmd: string[]): Promise<string> {
+	const proc = Bun.spawn(cmd, { stdout: "pipe", stderr: "ignore" });
+	const out = await new Response(proc.stdout).text();
+	await proc.exited;
+	return out;
+}
+
+// Returns milliseconds since last HID input (keyboard/mouse) on macOS.
+async function getIdleMs(): Promise<number> {
+	try {
+		const out = await runShellOutput(["sh", "-c", "ioreg -c IOHIDSystem | awk '/HIDIdleTime/ {print $NF; exit}'"]);
+		const ns = Number(out.trim());
+		if (!Number.isFinite(ns)) return Number.POSITIVE_INFINITY;
+		return ns / 1_000_000;
+	} catch {
+		return Number.POSITIVE_INFINITY;
+	}
+}
+
+async function moveMouseRandomly() {
 	const dx = Math.floor(Math.random() * 20) - 10;
 	const dy = Math.floor(Math.random() * 20) - 10;
-	const steps = 6 + Math.floor(Math.random() * 4);
-
-	// JXA bridges to CoreGraphics — kCGHIDEventTap = 0, kCGEventMouseMoved = 5
+	// ~1s total: 25 steps × ~0.04s per step, with small jitter.
+	const steps = 25;
 	const jxa = `
 ObjC.import("CoreGraphics");
 var loc = $.CGEventGetLocation($.CGEventCreate($()));
@@ -56,35 +75,49 @@ for (var i = 1; i <= steps; i++) {
   var y = sy + (ty - sy) * ease;
   var ev = $.CGEventCreateMouseEvent($(), 5, {x: x, y: y}, 0);
   $.CGEventPost(0, ev);
-  delay(0.02 + Math.random() * 0.03);
+  delay(0.035 + Math.random() * 0.01);
 }
 `;
 	await runShell(["osascript", "-l", "JavaScript", "-e", jxa]);
+}
 
-	await runShell([
-		"osascript",
-		"-e",
-		'tell application "System Events" to key code 48 using command down',
-	]);
-	await new Promise((r) => setTimeout(r, 1000));
-	await runShell([
-		"osascript",
-		"-e",
-		'tell application "System Events" to key code 48 using command down',
-	]);
+// Move the cursor with a few small human-ish eased steps, then press Cmd+Tab
+// a random number of times (2, 4, or 6).
+async function performJiggle() {
+	await moveMouseRandomly();
+
+	const tabCount = TAB_COUNT_CHOICES[Math.floor(Math.random() * TAB_COUNT_CHOICES.length)];
+	for (let i = 0; i < tabCount; i++) {
+		await runShell([
+			"osascript",
+			"-e",
+			'tell application "System Events" to key code 48 using command down',
+		]);
+		if (i < tabCount - 1) {
+			await new Promise((r) => setTimeout(r, 600 + Math.random() * 600));
+		}
+	}
 
 	status.actionCount += 1;
 	status.lastActionAt = Date.now();
 }
 
-function scheduleNext() {
+function scheduleNext(overrideDelay?: number) {
 	if (nextTimer) clearTimeout(nextTimer);
-	const delay = randomDelay();
+	const delay = overrideDelay ?? randomDelay();
 	status.nextActionAt = Date.now() + delay;
 	pushStatus();
 	nextTimer = setTimeout(async () => {
 		if (!status.enabled) return;
 		try {
+			const idle = await getIdleMs();
+			if (idle < IDLE_THRESHOLD_MS) {
+				// User is active — postpone until the idle threshold could be reached,
+				// plus a small jitter so we don't fire the instant they pause.
+				const wait = IDLE_THRESHOLD_MS - idle + 5_000 + Math.floor(Math.random() * 10_000);
+				scheduleNext(wait);
+				return;
+			}
 			await performJiggle();
 		} catch (err) {
 			console.error("Jiggle failed:", err);
