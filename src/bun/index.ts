@@ -1,4 +1,4 @@
-import { BrowserView, BrowserWindow, Updater } from "electrobun/bun";
+import Electrobun, { BrowserView, BrowserWindow, Updater } from "electrobun/bun";
 import { join } from "node:path";
 import type { Subprocess } from "bun";
 import type {
@@ -6,18 +6,38 @@ import type {
 	JigglerRPC,
 	JigglerStatus,
 	PauseReason,
+	RhythmInfo,
 	Settings,
 	Stats,
 	UpdatePhase,
 } from "../shared/types";
-import { runAction } from "./actions";
+import { resetPersona, runAction } from "./actions";
 import {
+	currentMeeting,
+	getCalendarInfo,
+	openCalendarPrivacy,
+	requestCalendarAccess,
+} from "./calendar";
+import { breakGapMs, breakLengthMs, naturalDelay } from "./humanize";
+import {
+	initRhythm,
+	markSyntheticEnd,
+	markSyntheticStart,
+	onActiveMinute,
+	onRhythmChange,
+	resetRhythm,
+	rhythmInfo,
+	setRhythmLearning,
+	stopRhythm,
+} from "./rhythm";
+import {
+	bumpHour,
+	emptyStatsValue,
 	loadSettings,
 	loadStats,
 	rollStatsDay,
 	saveSettings,
 	saveStats,
-	todayISO,
 } from "./settings";
 import {
 	getIdleMs,
@@ -25,6 +45,15 @@ import {
 	isOnCall,
 	isScreenLocked,
 } from "./system";
+import {
+	getHelperInfo,
+	installHelper,
+	onSleepGuardChange,
+	recoverSleepGuard,
+	releaseSleepGuardSync,
+	removeHelper,
+	requestSleepGuard,
+} from "./sleepguard";
 import { setupTray, tickTray, updateTray } from "./tray";
 
 const DEV_SERVER_PORT = 5173;
@@ -36,15 +65,26 @@ let caffeinate: Subprocess | null = null;
 let nextTimer: ReturnType<typeof setTimeout> | null = null;
 let autoStopTimer: ReturnType<typeof setTimeout> | null = null;
 let mainWindow: BrowserWindow | null = null;
+// End of our most recent synthetic action; 0 when unknown or the user
+// interrupted it. Lets the idle check tell our own input from the user's.
+let lastSyntheticAt = 0;
+let nextBreakAt: number | null = null;
+let breakUntil: number | null = null;
 
 const status: JigglerStatus = {
 	enabled: false,
 	lastActionAt: null,
 	nextActionAt: null,
+	waitStartedAt: null,
 	actionCount: 0,
 	sessionStartedAt: null,
 	autoStopAt: null,
 	pauseReason: null,
+	pauseDetail: null,
+	lastRoutine: null,
+	lastApp: null,
+	sleepGuard: "off",
+	recent: [],
 };
 
 let settings: Settings = (await loadSettings());
@@ -91,6 +131,13 @@ function pushStats() {
 	rpc?.send.statsChanged({ ...stats });
 }
 
+function pushRhythm(info: RhythmInfo) {
+	const rpc = mainWindow?.webview.rpc as
+		| { send: { rhythmChanged: (i: RhythmInfo) => void } }
+		| undefined;
+	rpc?.send.rhythmChanged(info);
+}
+
 function setUpdatePhase(phase: UpdatePhase, extra?: Partial<AppInfo>) {
 	appInfo.updatePhase = phase;
 	if (extra) Object.assign(appInfo, extra);
@@ -101,23 +148,97 @@ function randomDelay() {
 	const { minDelayMs, maxDelayMs } = settings;
 	const lo = Math.max(1000, minDelayMs);
 	const hi = Math.max(lo, maxDelayMs);
+	if (settings.actionType === "natural") return naturalDelay(lo, hi);
 	return Math.floor(lo + Math.random() * (hi - lo));
 }
 
-async function checkPauseReason(): Promise<PauseReason> {
-	if (settings.pauseOnLock && (await isScreenLocked())) return "lock";
-	if (settings.pauseOnBattery && (await isOnBattery())) return "battery";
-	if (settings.pauseOnCall && (await isOnCall())) return "call";
+// True once the user has been away long enough for us to act. Our own
+// synthetic input resets the HID idle clock too, so when nothing has happened
+// since our last action we treat the user as still away.
+async function userIsAway(): Promise<{ away: boolean; idle: number }> {
+	const idle = await getIdleMs();
+	if (idle >= settings.idleThresholdMs) return { away: true, idle };
+	const lastInputWasOurs =
+		lastSyntheticAt > 0 && idle + 1_500 >= Date.now() - lastSyntheticAt;
+	return { away: lastInputWasOurs, idle };
+}
+
+// Handles natural breaks. Returns a delay to wait if we're on a break.
+function breakDelay(): number | null {
+	const now = Date.now();
+	if (breakUntil) {
+		if (now < breakUntil) return breakUntil - now;
+		breakUntil = null;
+		nextBreakAt = now + breakGapMs();
+		if (status.pauseReason === "break") setPause(null);
+		pushStatus();
+		return null;
+	}
+	if (settings.naturalBreaks && nextBreakAt && now >= nextBreakAt) {
+		breakUntil = now + breakLengthMs();
+		setPause("break");
+		return breakUntil - now;
+	}
+	return null;
+}
+
+function setPause(reason: PauseReason, detail: string | null = null) {
+	status.pauseReason = reason;
+	status.pauseDetail = reason ? detail : null;
+}
+
+function endBreak() {
+	breakUntil = null;
+	if (status.pauseReason === "break") setPause(null);
+}
+
+type Pause = { reason: PauseReason; detail: string | null; recheckMs: number };
+
+async function checkPause(): Promise<Pause | null> {
+	if (settings.pauseOnLock && (await isScreenLocked()))
+		return { reason: "lock", detail: null, recheckMs: 60_000 };
+	if (settings.pauseOnBattery && (await isOnBattery()))
+		return { reason: "battery", detail: null, recheckMs: 60_000 };
+	if (settings.pauseOnCall && (await isOnCall()))
+		return { reason: "call", detail: null, recheckMs: 60_000 };
+	if (settings.pauseOnMeeting) {
+		const meeting = await currentMeeting();
+		if (meeting) {
+			// Wake shortly after it ends, but re-check at least every minute.
+			const untilEnd = meeting.end - Date.now() + 5_000 + Math.random() * 20_000;
+			return {
+				reason: "meeting",
+				detail: JSON.stringify({ title: meeting.title, end: meeting.end }),
+				recheckMs: Math.max(5_000, Math.min(60_000, untilEnd)),
+			};
+		}
+	}
 	return null;
 }
 
 async function performJiggle() {
-	await runAction(settings.actionType);
+	markSyntheticStart();
+	let result;
+	try {
+		result = await runAction({
+			type: settings.actionType,
+			appAware: settings.appAware,
+			scrollStyle: settings.scrollStyle,
+		});
+	} finally {
+		markSyntheticEnd();
+	}
+	lastSyntheticAt = result.interrupted ? 0 : Date.now();
+	status.lastRoutine = result.routine;
+	status.lastApp = result.app;
 	status.actionCount += 1;
 	status.lastActionAt = Date.now();
+	status.recent = [...status.recent, { at: status.lastActionAt, routine: result.routine }].slice(-60);
 	stats = rollStatsDay(stats);
 	stats.totalActions += 1;
 	stats.today.count += 1;
+	bumpHour(stats.hourly);
+	stats.routines[result.routine] = (stats.routines[result.routine] ?? 0) + 1;
 	void saveStats(stats);
 	pushStats();
 }
@@ -125,26 +246,31 @@ async function performJiggle() {
 function scheduleNext(overrideDelay?: number) {
 	if (nextTimer) clearTimeout(nextTimer);
 	const delay = overrideDelay ?? randomDelay();
-	status.nextActionAt = Date.now() + delay;
+	status.waitStartedAt = Date.now();
+	status.nextActionAt = status.waitStartedAt + delay;
 	pushStatus();
 	nextTimer = setTimeout(async () => {
 		if (!status.enabled) return;
 		try {
-			const reason = await checkPauseReason();
-			if (reason) {
-				if (status.pauseReason !== reason) {
-					status.pauseReason = reason;
-					pushStatus();
+			const onBreak = breakDelay();
+			if (onBreak != null) {
+				scheduleNext(onBreak);
+				return;
+			}
+			const pause = await checkPause();
+			if (pause) {
+				if (status.pauseReason !== pause.reason || status.pauseDetail !== pause.detail) {
+					setPause(pause.reason, pause.detail);
 				}
-				scheduleNext(60_000);
+				scheduleNext(pause.recheckMs);
 				return;
 			}
 			if (status.pauseReason) {
-				status.pauseReason = null;
+				setPause(null);
 				pushStatus();
 			}
-			const idle = await getIdleMs();
-			if (idle < settings.idleThresholdMs) {
+			const { away, idle } = await userIsAway();
+			if (!away) {
 				const wait =
 					settings.idleThresholdMs - idle + 5_000 + Math.floor(Math.random() * 10_000);
 				scheduleNext(wait);
@@ -160,7 +286,8 @@ function scheduleNext(overrideDelay?: number) {
 
 function startCaffeinate() {
 	if (caffeinate) return;
-	caffeinate = Bun.spawn(["caffeinate", "-dimsu"], {
+	// -w ties caffeinate's lifetime to ours, so a crash can't orphan it.
+	caffeinate = Bun.spawn(["caffeinate", "-dimsu", "-w", String(process.pid)], {
 		stdout: "ignore",
 		stderr: "ignore",
 	});
@@ -193,18 +320,30 @@ function setEnabled(enabled: boolean): JigglerStatus {
 	if (enabled) {
 		status.sessionStartedAt = Date.now();
 		status.actionCount = 0;
-		status.pauseReason = null;
+		setPause(null);
+		status.lastRoutine = null;
+		status.lastApp = null;
+		status.recent = [];
+		lastSyntheticAt = 0;
+		endBreak();
+		nextBreakAt = Date.now() + breakGapMs();
+		resetPersona();
 		scheduleAutoStop();
 		startCaffeinate();
+		void requestSleepGuard(settings.preventSystemSleep);
 		scheduleNext();
 	} else {
 		if (nextTimer) clearTimeout(nextTimer);
 		nextTimer = null;
 		status.nextActionAt = null;
+		status.waitStartedAt = null;
 		status.sessionStartedAt = null;
-		status.pauseReason = null;
+		setPause(null);
+		endBreak();
+		nextBreakAt = null;
 		clearAutoStop();
 		stopCaffeinate();
+		void requestSleepGuard(false);
 		pushStatus();
 	}
 	return { ...status };
@@ -233,6 +372,24 @@ function applySettingsSideEffects(prev: Settings) {
 		// Reschedule so the new window takes effect immediately.
 		scheduleNext();
 	}
+	if (status.enabled && prev.preventSystemSleep !== settings.preventSystemSleep) {
+		void requestSleepGuard(settings.preventSystemSleep);
+	}
+	if (prev.learnRhythm !== settings.learnRhythm) {
+		setRhythmLearning(settings.learnRhythm);
+	}
+	if (status.enabled && prev.pauseOnMeeting !== settings.pauseOnMeeting) {
+		// Re-evaluate right away rather than waiting out the current timer.
+		if (status.pauseReason === "meeting" && !settings.pauseOnMeeting) setPause(null);
+		scheduleNext(1_000);
+	}
+	if (status.enabled && prev.naturalBreaks !== settings.naturalBreaks) {
+		nextBreakAt = Date.now() + breakGapMs();
+		if (!settings.naturalBreaks && breakUntil) {
+			endBreak();
+			scheduleNext();
+		}
+	}
 }
 
 function updateSettings(patch: Partial<Settings>): Settings {
@@ -245,7 +402,7 @@ function updateSettings(patch: Partial<Settings>): Settings {
 }
 
 function resetStats(): Stats {
-	stats = { totalActions: 0, today: { date: todayISO(), count: 0 }, history: {} };
+	stats = emptyStatsValue();
 	void saveStats(stats);
 	pushStats();
 	return { ...stats };
@@ -321,6 +478,20 @@ const rpc = BrowserView.defineRPC<JigglerRPC>({
 			updateSettings: (patch) => updateSettings(patch),
 			getStats: () => ({ ...stats }),
 			resetStats: () => resetStats(),
+			retrySleepGuard: async () => {
+				if (status.enabled && settings.preventSystemSleep) {
+					void requestSleepGuard(true, true);
+				}
+				return { ...status };
+			},
+			getSleepHelper: () => getHelperInfo(),
+			installSleepHelper: () => installHelper(),
+			removeSleepHelper: () => removeHelper(),
+			getCalendarInfo: () => getCalendarInfo(),
+			requestCalendarAccess: () => requestCalendarAccess(),
+			openCalendarPrivacy: () => openCalendarPrivacy(),
+			getRhythm: () => rhythmInfo(),
+			resetRhythm: () => resetRhythm(),
 		},
 		messages: {},
 	},
@@ -362,6 +533,23 @@ function resolveStartPosition(): { x: number; y: number } {
 
 await loadAppInfo();
 
+onSleepGuardChange((state) => {
+	if (status.sleepGuard === state) return;
+	status.sleepGuard = state;
+	pushStatus();
+});
+// Undo a sleep block left behind if the app crashed mid-session.
+void recoverSleepGuard();
+
+onRhythmChange(pushRhythm);
+onActiveMinute(() => {
+	stats = rollStatsDay(stats);
+	bumpHour(stats.userHourly);
+	void saveStats(stats);
+	pushStats();
+});
+await initRhythm(settings.learnRhythm);
+
 const url = await getMainViewUrl();
 const startPos = resolveStartPosition();
 
@@ -369,9 +557,14 @@ mainWindow = new BrowserWindow({
 	title: "Focus Timer",
 	url,
 	rpc,
+	// Content runs under a transparent title bar; the view draws its own
+	// header and marks it as a drag region.
+	titleBarStyle: "hiddenInset",
+	// Centers the traffic lights on the 52px header's midline.
+	trafficLightOffset: { x: 8, y: 12 },
 	frame: {
-		width: 380,
-		height: 520,
+		width: 440,
+		height: 720,
 		x: startPos.x,
 		y: startPos.y,
 	},
@@ -442,7 +635,25 @@ setInterval(() => {
 	tickTray();
 }, 1000);
 
-process.on("exit", () => stopCaffeinate());
+let shuttingDown = false;
+function shutdown() {
+	if (shuttingDown) return;
+	shuttingDown = true;
+	stopCaffeinate();
+	stopRhythm();
+	releaseSleepGuardSync();
+}
+
+// Electrobun's native quit path force-exits without firing process "exit",
+// so restore sleep here first.
+Electrobun.events.on("before-quit", shutdown);
+process.on("exit", shutdown);
+for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"] as const) {
+	process.on(signal, () => {
+		shutdown();
+		process.exit(0);
+	});
+}
 
 console.log("Focus Timer started");
 

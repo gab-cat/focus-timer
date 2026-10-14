@@ -1,9 +1,12 @@
 import { Electroview } from "electrobun/view";
 import type {
 	AppInfo,
+	CalendarInfo,
 	JigglerRPC,
+	RhythmInfo,
 	JigglerStatus,
 	Settings,
+	SleepHelperInfo,
 	Stats,
 } from "../shared/types";
 
@@ -11,11 +14,18 @@ type StatusListener = (s: JigglerStatus) => void;
 type AppInfoListener = (i: AppInfo) => void;
 type SettingsListener = (s: Settings) => void;
 type StatsListener = (s: Stats) => void;
+type RhythmListener = (r: RhythmInfo) => void;
 
 const statusListeners = new Set<StatusListener>();
 const appInfoListeners = new Set<AppInfoListener>();
 const settingsListeners = new Set<SettingsListener>();
 const statsListeners = new Set<StatsListener>();
+const rhythmListeners = new Set<RhythmListener>();
+
+export function onRhythm(fn: RhythmListener) {
+	rhythmListeners.add(fn);
+	return () => rhythmListeners.delete(fn);
+}
 
 export function onStatus(fn: StatusListener) {
 	statusListeners.add(fn);
@@ -38,6 +48,8 @@ export function onStats(fn: StatsListener) {
 }
 
 const rpc = Electroview.defineRPC<JigglerRPC>({
+	// Some requests wait on a macOS password dialog or a multi-step routine.
+	maxRequestTime: 10 * 60_000,
 	handlers: {
 		requests: {},
 		messages: {
@@ -52,6 +64,9 @@ const rpc = Electroview.defineRPC<JigglerRPC>({
 			},
 			statsChanged: (s) => {
 				for (const fn of statsListeners) fn(s);
+			},
+			rhythmChanged: (r) => {
+				for (const fn of rhythmListeners) fn(r);
 			},
 		},
 	},
@@ -97,4 +112,40 @@ export async function getStats(): Promise<Stats> {
 
 export async function resetStats(): Promise<Stats> {
 	return electroview.rpc!.request.resetStats({});
+}
+
+export async function retrySleepGuard(): Promise<JigglerStatus> {
+	return electroview.rpc!.request.retrySleepGuard({});
+}
+
+export async function getSleepHelper(): Promise<SleepHelperInfo> {
+	return electroview.rpc!.request.getSleepHelper({});
+}
+
+export async function installSleepHelper(): Promise<SleepHelperInfo> {
+	return electroview.rpc!.request.installSleepHelper({});
+}
+
+export async function removeSleepHelper(): Promise<SleepHelperInfo> {
+	return electroview.rpc!.request.removeSleepHelper({});
+}
+
+export async function getCalendarInfo(): Promise<CalendarInfo> {
+	return electroview.rpc!.request.getCalendarInfo({});
+}
+
+export async function requestCalendarAccess(): Promise<CalendarInfo> {
+	return electroview.rpc!.request.requestCalendarAccess({});
+}
+
+export async function openCalendarPrivacy(): Promise<void> {
+	return electroview.rpc!.request.openCalendarPrivacy({});
+}
+
+export async function getRhythm(): Promise<RhythmInfo> {
+	return electroview.rpc!.request.getRhythm({});
+}
+
+export async function resetRhythm(): Promise<RhythmInfo> {
+	return electroview.rpc!.request.resetRhythm({});
 }

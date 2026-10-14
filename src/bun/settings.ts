@@ -6,7 +6,7 @@ import {
 	type Stats,
 } from "../shared/types";
 
-const SUPPORT_DIR = `${process.env.HOME}/Library/Application Support/com.focustimer.app`;
+export const SUPPORT_DIR = `${process.env.HOME}/Library/Application Support/com.focustimer.app`;
 const SETTINGS_PATH = `${SUPPORT_DIR}/settings.json`;
 const STATS_PATH = `${SUPPORT_DIR}/stats.json`;
 
@@ -22,7 +22,36 @@ function emptyStats(): Stats {
 		totalActions: 0,
 		today: { date: todayISO(), count: 0 },
 		history: {},
+		hourly: {},
+		userHourly: {},
+		routines: {},
 	};
+}
+
+const HEATMAP_DAYS = 7;
+
+function sanitizeHourly(raw: unknown): Record<string, number[]> {
+	const out: Record<string, number[]> = {};
+	if (!raw || typeof raw !== "object") return out;
+	for (const [k, v] of Object.entries(raw)) {
+		if (Array.isArray(v) && v.length === 24 && v.every((n) => typeof n === "number")) {
+			out[k] = v as number[];
+		}
+	}
+	return out;
+}
+
+function trimDays(map: Record<string, number[]>) {
+	const keys = Object.keys(map).sort();
+	while (keys.length > HEATMAP_DAYS) delete map[keys.shift()!];
+}
+
+// Increments one hour bucket for today's date in a heatmap map.
+export function bumpHour(map: Record<string, number[]>, at = new Date(), by = 1) {
+	const key = todayISO();
+	const row = map[key] ?? (map[key] = new Array(24).fill(0));
+	row[at.getHours()] += by;
+	trimDays(map);
 }
 
 async function ensureDir(path: string) {
@@ -87,7 +116,20 @@ function sanitizeStats(input: unknown): Stats {
 			if (typeof v === "number") history[k] = v;
 		}
 	}
-	return { totalActions: total, today, history };
+	const routines: Record<string, number> = {};
+	if (src.routines && typeof src.routines === "object") {
+		for (const [k, v] of Object.entries(src.routines)) {
+			if (typeof v === "number") routines[k] = v;
+		}
+	}
+	return {
+		totalActions: total,
+		today,
+		history,
+		hourly: sanitizeHourly(src.hourly),
+		userHourly: sanitizeHourly(src.userHourly),
+		routines,
+	};
 }
 
 export async function loadStats(): Promise<Stats> {
@@ -114,10 +156,14 @@ export function rollStatsDay(s: Stats): Stats {
 	const today = todayISO();
 	if (s.today.date === today) return s;
 	const next: Stats = {
-		totalActions: s.totalActions,
+		...s,
 		today: { date: today, count: 0 },
 		history: { ...s.history, [s.today.date]: s.today.count },
+		hourly: { ...s.hourly },
+		userHourly: { ...s.userHourly },
 	};
+	trimDays(next.hourly);
+	trimDays(next.userHourly);
 	// Keep only the most recent 7 entries.
 	const keys = Object.keys(next.history).sort();
 	while (keys.length > 7) {

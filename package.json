@@ -4,15 +4,19 @@
   "description": "Focus Timer — keeps your Mac awake during deep work sessions",
   "scripts": {
     "icons": "bun run scripts/build-icons.ts",
-    "start": "vite build && electrobun dev",
-    "dev": "electrobun dev --watch",
+    "postinstall": "bun run scripts/ensure-electrobun-cli.ts",
+    "ensure-cli": "bun run scripts/ensure-electrobun-cli.ts",
+    "start": "bun run ensure-cli && vite build && electrobun dev",
+    "dev": "bun run ensure-cli && vite build && electrobun dev --watch",
     "dev:hmr": "concurrently \"bun run hmr\" \"bun run start\"",
     "hmr": "vite --port 5173",
     "prebuild:canary": "bun run icons",
-    "build:canary": "vite build && electrobun build --env=canary",
-    "build": "vite build && electrobun build --env=stable"
+    "build:canary": "bun run ensure-cli && vite build && electrobun build --env=canary",
+    "build": "bun run ensure-cli && vite build && electrobun build --env=stable"
   },
   "dependencies": {
+    "@fontsource-variable/geist": "^5.3.0",
+    "@fontsource-variable/geist-mono": "^5.3.0",
     "@types/three": "^0.184.1",
     "electrobun": "1.18.1",
     "react": "^18.3.1",

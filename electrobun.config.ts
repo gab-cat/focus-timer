@@ -15,6 +15,8 @@ export default {
 		baseUrl: "https://github.com/gab-cat/focus-timer/releases/latest/download",
 	},
 	scripts: {
+		// Adds Calendar / Apple Events usage descriptions to Info.plist.
+		postBuild: "scripts/post-build-plist.ts",
 		// Runs after the DMG wrapper bundle is built, before the DMG is created.
 		// Ad-hoc signs the wrapper so Gatekeeper shows "unidentified developer"
 		// instead of "damaged". Update tarballs stay unsigned — the Updater

@@ -1,254 +1,440 @@
-import { useState } from "react";
-import type { ActionType, Settings as SettingsType, ThemePref } from "../shared/types";
-import { resetStats, updateSettings } from "./rpc";
+import { useEffect, useState } from "react";
+import type {
+	ActionType,
+	AppInfo,
+	CalendarInfo,
+	Settings as SettingsType,
+	SleepHelperInfo,
+} from "../shared/types";
+import { clock, minuteRange, minutesLabel } from "./format";
+import {
+	applyUpdate,
+	checkForUpdate,
+	getCalendarInfo,
+	getSleepHelper,
+	installSleepHelper,
+	openCalendarPrivacy,
+	removeSleepHelper,
+	requestCalendarAccess,
+	resetStats,
+	updateSettings,
+} from "./rpc";
+import { LinkButton, Row, Section, Segmented, Toggle } from "./ui";
 
-type Preset = "subtle" | "normal" | "aggressive" | "custom";
+const patch = (p: Partial<SettingsType>) => void updateSettings(p);
 
-function presetFor(s: SettingsType): Preset {
-	if (s.minDelayMs === 180_000 && s.maxDelayMs === 300_000 && s.idleThresholdMs === 300_000)
-		return "subtle";
-	if (s.minDelayMs === 90_000 && s.maxDelayMs === 180_000 && s.idleThresholdMs === 120_000)
-		return "normal";
-	if (s.minDelayMs === 30_000 && s.maxDelayMs === 60_000 && s.idleThresholdMs === 30_000)
-		return "aggressive";
+type Pace = "subtle" | "normal" | "brisk" | "custom";
+
+const PACES: Record<Exclude<Pace, "custom">, Partial<SettingsType>> = {
+	subtle: { minDelayMs: 180_000, maxDelayMs: 300_000, idleThresholdMs: 300_000 },
+	normal: { minDelayMs: 90_000, maxDelayMs: 180_000, idleThresholdMs: 120_000 },
+	brisk: { minDelayMs: 30_000, maxDelayMs: 60_000, idleThresholdMs: 30_000 },
+};
+
+function paceOf(s: SettingsType): Pace {
+	for (const [name, v] of Object.entries(PACES)) {
+		if (
+			s.minDelayMs === v.minDelayMs &&
+			s.maxDelayMs === v.maxDelayMs &&
+			s.idleThresholdMs === v.idleThresholdMs
+		)
+			return name as Pace;
+	}
 	return "custom";
 }
 
-const PRESET_VALUES: Record<Exclude<Preset, "custom">, Partial<SettingsType>> = {
-	subtle: { minDelayMs: 180_000, maxDelayMs: 300_000, idleThresholdMs: 300_000 },
-	normal: { minDelayMs: 90_000, maxDelayMs: 180_000, idleThresholdMs: 120_000 },
-	aggressive: { minDelayMs: 30_000, maxDelayMs: 60_000, idleThresholdMs: 30_000 },
-};
-
-const ACTION_OPTIONS: Array<{ value: ActionType; label: string; hint: string }> = [
-	{ value: "cmdtab", label: "Cmd+Tab", hint: "Cycles apps. Most reliable." },
-	{ value: "mouse", label: "Mouse only", hint: "Tiny cursor move. No focus change." },
-	{ value: "scroll", label: "Scroll wheel", hint: "One up, one down." },
-	{ value: "shift", label: "Shift tap", hint: "Single key press. Silent." },
+const MODES: Array<{ value: ActionType; title: string; description: string }> = [
+	{
+		value: "natural",
+		title: "Natural",
+		description: "Curved mouse paths, reading scrolls, quick app glances. Never the same move twice in a row.",
+	},
+	{ value: "mouse", title: "Mouse only", description: "Small and medium cursor moves. Never changes focus." },
+	{ value: "scroll", title: "Scroll", description: "One flick down and back. Net zero." },
+	{ value: "shift", title: "Shift tap", description: "A single modifier key press. Silent." },
+	{ value: "cmdtab", title: "⌘-Tab", description: "Cycles through apps. Most visible, most disruptive." },
 ];
 
-const AUTO_STOP_OPTIONS: Array<{ value: number | null; label: string }> = [
-	{ value: null, label: "Off" },
-	{ value: 30 * 60_000, label: "30 min" },
-	{ value: 60 * 60_000, label: "1 hour" },
-	{ value: 2 * 60 * 60_000, label: "2 hours" },
-	{ value: 4 * 60 * 60_000, label: "4 hours" },
-];
-
-const THEME_OPTIONS: Array<{ value: ThemePref; label: string }> = [
-	{ value: "auto", label: "Auto" },
-	{ value: "dark", label: "Dark" },
-	{ value: "light", label: "Light" },
-];
-
-function Row({
-	label,
-	children,
-}: {
-	label: string;
-	children: React.ReactNode;
-}) {
+function ModePicker({ value }: { value: ActionType }) {
 	return (
-		<div className="flex items-center justify-between gap-3">
-			<span className="text-[11px] uppercase tracking-[0.14em] text-neutral-500 dark:text-neutral-500">
-				{label}
-			</span>
-			<div className="flex items-center gap-1">{children}</div>
+		<div role="radiogroup" aria-label="Activity mode" className="divide-y divide-line/70">
+			{MODES.map((m) => {
+				const on = m.value === value;
+				return (
+					<button
+						key={m.value}
+						role="radio"
+						aria-checked={on}
+						onClick={() => patch({ actionType: m.value })}
+						className={`press-soft flex w-full items-start gap-3 px-4 py-3 text-left ${
+							on ? "bg-accent/[0.06]" : "hover:bg-ink/[0.025]"
+						}`}
+					>
+						<span
+							className={`mt-[3px] flex h-4 w-4 shrink-0 items-center justify-center rounded-full transition-all duration-300 ${
+								on ? "bg-accent" : "ring-[1.5px] ring-inset ring-ink/20"
+							}`}
+						>
+							<span className={`h-1.5 w-1.5 rounded-full bg-accent-ink transition-transform duration-300 ease-spring ${on ? "scale-100" : "scale-0"}`} />
+						</span>
+						<span className="min-w-0 flex-1">
+							<span className="flex items-center gap-2 text-[13.5px] font-medium tracking-[-0.01em]">
+								{m.title}
+								{m.value === "natural" ? (
+									<span className="rounded-[5px] bg-accent/15 px-1.5 py-[1px] text-[10.5px] font-semibold text-accent">
+										Recommended
+									</span>
+								) : null}
+							</span>
+							<span className="mt-0.5 block text-[12px] leading-[1.45] text-ink-3 [text-wrap:pretty]">
+								{m.description}
+							</span>
+						</span>
+					</button>
+				);
+			})}
 		</div>
 	);
 }
 
-function SegBtn({
-	active,
-	onClick,
-	children,
-	title,
-}: {
-	active: boolean;
-	onClick: () => void;
-	children: React.ReactNode;
-	title?: string;
-}) {
-	return (
-		<button
-			onClick={onClick}
-			title={title}
-			className={`px-2 py-1 rounded text-[11px] font-medium transition-colors ${
-				active
-					? "bg-neutral-200 text-neutral-900 dark:bg-neutral-100 dark:text-neutral-900"
-					: "text-neutral-600 hover:text-neutral-900 dark:text-neutral-400 dark:hover:text-neutral-100"
-			}`}
-		>
-			{children}
-		</button>
-	);
-}
+function CalendarRow({ settings }: { settings: SettingsType }) {
+	const [info, setInfo] = useState<CalendarInfo | null>(null);
+	const [asking, setAsking] = useState(false);
 
-function Toggle({
-	value,
-	onChange,
-}: {
-	value: boolean;
-	onChange: (v: boolean) => void;
-}) {
-	return (
-		<button
-			onClick={() => onChange(!value)}
-			className={`relative h-5 w-9 shrink-0 rounded-full p-0 transition-colors ${
-				value ? "bg-emerald-500" : "bg-neutral-300 dark:bg-neutral-700"
-			}`}
-			aria-pressed={value}
-		>
-			<span
-				className={`absolute left-0.5 top-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform ${
-					value ? "translate-x-4" : "translate-x-0"
-				}`}
-			/>
-		</button>
-	);
-}
+	useEffect(() => {
+		if (settings.pauseOnMeeting) getCalendarInfo().then(setInfo).catch(() => {});
+	}, [settings.pauseOnMeeting]);
 
-export function Settings({ settings, onClose }: { settings: SettingsType; onClose: () => void }) {
-	const preset = presetFor(settings);
-	const [confirmingReset, setConfirmingReset] = useState(false);
+	async function toggle(v: boolean) {
+		patch({ pauseOnMeeting: v });
+		if (!v) return;
+		setAsking(true);
+		try {
+			const current = await getCalendarInfo();
+			setInfo(current.access === "notDetermined" ? await requestCalendarAccess() : current);
+		} finally {
+			setAsking(false);
+		}
+	}
 
-	function patch(p: Partial<SettingsType>) {
-		void updateSettings(p);
+	let detail: React.ReactNode = "Events with other people or a video link. Solo blocks don't count.";
+	if (settings.pauseOnMeeting) {
+		if (asking) detail = "Waiting for Calendar access…";
+		else if (info?.access === "denied" || info?.access === "restricted" || info?.access === "writeOnly") {
+			detail = (
+				<span>
+					<span className="text-warn">Calendar access is off.</span>{" "}
+					<button onClick={() => void openCalendarPrivacy()} className="font-medium text-ink-2 underline decoration-ink/20 underline-offset-2 hover:text-ink">
+						Open Privacy settings
+					</button>
+				</span>
+			);
+		} else if (info?.access === "granted") {
+			detail = info.current
+				? `Now: ${info.current.title}, until ${clock(info.current.end)}`
+				: info.next
+					? `Next: ${info.next.title} at ${clock(info.next.start)}`
+					: "No more meetings today";
+		} else if (info?.access === "notDetermined") {
+			detail = (
+				<button onClick={() => void toggle(true)} className="font-medium text-accent hover:text-accent/80">
+					Allow Calendar access
+				</button>
+			);
+		}
 	}
 
 	return (
-		<div className="flex flex-col h-full bg-neutral-50 dark:bg-neutral-950 text-neutral-900 dark:text-neutral-100 overflow-hidden">
-			<div className="flex items-center justify-between px-6 pt-5 pb-3">
-				<span className="text-[11px] uppercase tracking-[0.2em] text-neutral-500 dark:text-neutral-500">
-					Settings
-				</span>
-				<button
-					onClick={onClose}
-					className="text-[11px] uppercase tracking-[0.14em] text-neutral-500 hover:text-neutral-900 dark:hover:text-neutral-100 transition-colors"
-				>
-					Done
-				</button>
-			</div>
+		<Row
+			icon="calendar"
+			title="In a meeting"
+			description={detail}
+			control={<Toggle label="Pause in meetings" value={settings.pauseOnMeeting} onChange={(v) => void toggle(v)} />}
+		/>
+	);
+}
 
-			<div className="flex-1 overflow-y-auto px-6 pb-5 space-y-4">
-				<Row label="Interval">
-					{(["subtle", "normal", "aggressive"] as const).map((p) => (
-						<SegBtn
-							key={p}
-							active={preset === p}
-							onClick={() => patch(PRESET_VALUES[p])}
-						>
-							{p[0].toUpperCase() + p.slice(1)}
-						</SegBtn>
-					))}
-					{preset === "custom" ? (
-						<SegBtn active onClick={() => {}} title="Edit settings.json for custom values">
-							Custom
-						</SegBtn>
-					) : null}
-				</Row>
+function SleepHelperRow() {
+	const [info, setInfo] = useState<SleepHelperInfo | null>(null);
+	const [busy, setBusy] = useState(false);
 
-				<div>
-					<div className="text-[11px] uppercase tracking-[0.14em] text-neutral-500 dark:text-neutral-500 mb-2">
-						Action
-					</div>
-					<div className="grid grid-cols-2 gap-1">
-						{ACTION_OPTIONS.map((opt) => (
-							<button
-								key={opt.value}
-								onClick={() => patch({ actionType: opt.value })}
-								title={opt.hint}
-								className={`text-left px-2.5 py-1.5 rounded text-[11px] font-medium transition-colors ${
-									settings.actionType === opt.value
-										? "bg-neutral-200 text-neutral-900 dark:bg-neutral-100 dark:text-neutral-900"
-										: "bg-neutral-100 text-neutral-700 hover:bg-neutral-200 dark:bg-neutral-900 dark:text-neutral-300 dark:hover:bg-neutral-800"
-								}`}
-							>
-								{opt.label}
-							</button>
-						))}
-					</div>
-				</div>
+	useEffect(() => {
+		getSleepHelper().then(setInfo).catch(() => {});
+	}, []);
 
-				<div>
-					<div className="text-[11px] uppercase tracking-[0.14em] text-neutral-500 dark:text-neutral-500 mb-2">
-						Pause when
-					</div>
-					<div className="space-y-1.5">
-						<Row label="On battery">
-							<Toggle value={settings.pauseOnBattery} onChange={(v) => patch({ pauseOnBattery: v })} />
-						</Row>
-						<Row label="On a call">
-							<Toggle value={settings.pauseOnCall} onChange={(v) => patch({ pauseOnCall: v })} />
-						</Row>
-						<Row label="Screen locked">
-							<Toggle value={settings.pauseOnLock} onChange={(v) => patch({ pauseOnLock: v })} />
-						</Row>
-					</div>
-				</div>
+	async function run(fn: () => Promise<SleepHelperInfo>) {
+		setBusy(true);
+		try {
+			setInfo(await fn());
+		} catch {
+		} finally {
+			setBusy(false);
+		}
+	}
 
-				<Row label="Auto-stop">
-					<select
-						value={settings.autoStopMs ?? ""}
-						onChange={(e) =>
-							patch({ autoStopMs: e.target.value === "" ? null : Number(e.target.value) })
-						}
-						className="bg-neutral-100 dark:bg-neutral-900 text-neutral-900 dark:text-neutral-100 text-[11px] rounded px-2 py-1 border border-neutral-200 dark:border-neutral-800"
+	return (
+		<Row
+			icon="lock"
+			title="Skip the password"
+			description={
+				info?.error ? (
+					<span className="text-warn">{info.error}</span>
+				) : info?.installed ? (
+					"Sessions block and restore sleep silently."
+				) : (
+					"Otherwise macOS asks for your password at the start and end of each session. Allows only pmset disablesleep."
+				)
+			}
+			control={
+				info == null ? (
+					<span className="text-[12px] text-ink-3">…</span>
+				) : info.installed ? (
+					<LinkButton onClick={() => void run(removeSleepHelper)} disabled={busy}>
+						{busy ? "Waiting…" : "Remove"}
+					</LinkButton>
+				) : (
+					<button
+						disabled={busy}
+						onClick={() => void run(installSleepHelper)}
+						className="press h-[28px] rounded-[9px] bg-ink px-3 text-[12px] font-semibold text-bg transition-opacity hover:opacity-90 disabled:opacity-40"
 					>
-						{AUTO_STOP_OPTIONS.map((opt) => (
-							<option key={String(opt.value)} value={opt.value ?? ""}>
-								{opt.label}
-							</option>
-						))}
-					</select>
-				</Row>
+						{busy ? "Waiting…" : "Set up"}
+					</button>
+				)
+			}
+		/>
+	);
+}
 
-				<Row label="Theme">
-					{THEME_OPTIONS.map((opt) => (
-						<SegBtn
-							key={opt.value}
-							active={settings.theme === opt.value}
-							onClick={() => patch({ theme: opt.value })}
+function DataRow() {
+	const [confirm, setConfirm] = useState(false);
+	return (
+		<Row
+			title="Activity history"
+			description="Counts, heatmap and mix. Your rhythm profile is reset from Insights."
+			control={
+				confirm ? (
+					<span className="flex gap-3">
+						<LinkButton onClick={() => setConfirm(false)}>Cancel</LinkButton>
+						<LinkButton
+							tone="danger"
+							onClick={() => {
+								void resetStats();
+								setConfirm(false);
+							}}
 						>
-							{opt.label}
-						</SegBtn>
-					))}
-				</Row>
+							Erase
+						</LinkButton>
+					</span>
+				) : (
+					<LinkButton onClick={() => setConfirm(true)}>Reset…</LinkButton>
+				)
+			}
+		/>
+	);
+}
 
-				<div className="pt-2 border-t border-neutral-200 dark:border-neutral-900">
-					{confirmingReset ? (
-						<div className="flex items-center justify-between">
-							<span className="text-[11px] text-neutral-600 dark:text-neutral-400">
-								Reset all stats?
-							</span>
-							<div className="flex gap-1">
-								<button
-									onClick={() => setConfirmingReset(false)}
-									className="px-2 py-1 rounded text-[11px] text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-neutral-100"
-								>
-									Cancel
-								</button>
-								<button
-									onClick={() => {
-										void resetStats();
-										setConfirmingReset(false);
-									}}
-									className="px-2 py-1 rounded text-[11px] bg-red-500/90 text-white hover:bg-red-500"
-								>
-									Reset
-								</button>
-							</div>
-						</div>
-					) : (
-						<button
-							onClick={() => setConfirmingReset(true)}
-							className="text-[11px] uppercase tracking-[0.14em] text-neutral-500 hover:text-neutral-900 dark:hover:text-neutral-100 transition-colors"
-						>
-							Reset stats
-						</button>
-					)}
-				</div>
+function VersionFooter({ info }: { info: AppInfo }) {
+	const [checking, setChecking] = useState(false);
+	const channel = info.channel && info.channel !== "stable" ? ` · ${info.channel}` : "";
+	let action: React.ReactNode = (
+		<LinkButton
+			disabled={checking || info.updatePhase === "checking" || info.updatePhase === "downloading"}
+			onClick={async () => {
+				setChecking(true);
+				try {
+					await checkForUpdate();
+				} finally {
+					setChecking(false);
+				}
+			}}
+		>
+			{info.updatePhase === "checking"
+				? "Checking…"
+				: info.updatePhase === "downloading"
+					? `Downloading${info.updateProgress != null ? ` ${info.updateProgress}%` : "…"}`
+					: "Check for updates"}
+		</LinkButton>
+	);
+	if (info.updateReady) {
+		action = (
+			<LinkButton tone="accent" onClick={() => void applyUpdate()}>
+				Restart to update{info.availableVersion ? ` to ${info.availableVersion}` : ""}
+			</LinkButton>
+		);
+	} else if (info.updatePhase === "error") {
+		action = (
+			<span title={info.error ?? undefined}>
+				<LinkButton tone="danger" onClick={() => void checkForUpdate()}>
+					Update failed · Retry
+				</LinkButton>
+			</span>
+		);
+	}
+	return (
+		<div className="flex items-center justify-between px-1 pt-1">
+			<span className="font-mono text-[11px] text-ink-3">
+				{info.version ? `Focus Timer ${info.version}${channel}` : "Focus Timer"}
+			</span>
+			{action}
+		</div>
+	);
+}
+
+export function Settings({ settings, appInfo }: { settings: SettingsType; appInfo: AppInfo }) {
+	const pace = paceOf(settings);
+	const paceText = `Every ${minuteRange(settings.minDelayMs, settings.maxDelayMs)} once you're ${minutesLabel(settings.idleThresholdMs)} idle`;
+
+	return (
+		<div className="no-scrollbar h-full space-y-5 overflow-y-auto px-5 pb-6">
+			<Section title="How it moves" index={0}>
+				<ModePicker value={settings.actionType} />
+			</Section>
+
+			<Section title="Feel" index={1}>
+				<Row
+					title="Pace"
+					description={pace === "custom" ? `Custom · ${paceText}` : paceText}
+					control={
+						<Segmented
+							size="sm"
+							label="Pace"
+							value={pace === "custom" ? ("custom" as Pace) : pace}
+							onChange={(p) => p !== "custom" && patch(PACES[p])}
+							options={[
+								{ value: "subtle" as Pace, label: "Subtle" },
+								{ value: "normal" as Pace, label: "Normal" },
+								{ value: "brisk" as Pace, label: "Brisk" },
+								...(pace === "custom" ? [{ value: "custom" as Pace, label: "Custom" }] : []),
+							]}
+						/>
+					}
+				/>
+				<Row
+					icon="window"
+					title="Fit the app in front"
+					description="Reads in browsers and docs, stays inside the front window, never ⌘-Tabs out of a terminal or editor."
+					control={<Toggle label="Fit the app in front" value={settings.appAware} onChange={(v) => patch({ appAware: v })} />}
+				/>
+				<Row
+					icon="scroll"
+					title="Scroll feel"
+					description={settings.scrollStyle === "trackpad" ? "Two-finger swipes with momentum, like a trackpad." : "Plain wheel clicks, like a mouse."}
+					control={
+						<Segmented
+							size="sm"
+							label="Scroll feel"
+							value={settings.scrollStyle}
+							onChange={(v) => patch({ scrollStyle: v })}
+							options={[
+								{ value: "trackpad", label: "Trackpad" },
+								{ value: "wheel", label: "Wheel" },
+							]}
+						/>
+					}
+				/>
+				<Row
+					icon="wave"
+					title="Learn my rhythm"
+					description="Copies your own move distances, speed and pauses. Progress is under Insights."
+					control={<Toggle label="Learn my rhythm" value={settings.learnRhythm} onChange={(v) => patch({ learnRhythm: v })} />}
+				/>
+				<Row
+					icon="cup"
+					title="Short breaks"
+					description="Every 45–110 min, goes quiet for 3–11 min."
+					control={<Toggle label="Short breaks" value={settings.naturalBreaks} onChange={(v) => patch({ naturalBreaks: v })} />}
+				/>
+			</Section>
+
+			<Section title="Pause when" index={2}>
+				<Row
+					icon="lock"
+					title="Screen is locked"
+					control={<Toggle label="Pause when locked" value={settings.pauseOnLock} onChange={(v) => patch({ pauseOnLock: v })} />}
+				/>
+				<Row
+					icon="phone"
+					title="On a call"
+					description="Zoom, Teams, FaceTime, Webex, Discord."
+					control={<Toggle label="Pause on calls" value={settings.pauseOnCall} onChange={(v) => patch({ pauseOnCall: v })} />}
+				/>
+				<CalendarRow settings={settings} />
+				<Row
+					icon="battery"
+					title="On battery"
+					control={<Toggle label="Pause on battery" value={settings.pauseOnBattery} onChange={(v) => patch({ pauseOnBattery: v })} />}
+				/>
+			</Section>
+
+			<Section title="Keep awake" index={3}>
+				<Row
+					icon="moon"
+					title="Block system sleep"
+					description="Runs pmset disablesleep while a session is on, even with the lid closed. Restored when it ends."
+					control={
+						<Toggle
+							label="Block system sleep"
+							value={settings.preventSystemSleep}
+							onChange={(v) => patch({ preventSystemSleep: v })}
+						/>
+					}
+				/>
+				{settings.preventSystemSleep ? <SleepHelperRow /> : null}
+				<Row
+					icon="timer"
+					title="Auto-stop"
+					control={
+						<Segmented
+							size="sm"
+							label="Auto-stop"
+							value={settings.autoStopMs}
+							onChange={(v) => patch({ autoStopMs: v })}
+							options={[
+								{ value: null, label: "Off" },
+								{ value: 30 * 60_000, label: "30m" },
+								{ value: 60 * 60_000, label: "1h" },
+								{ value: 2 * 60 * 60_000, label: "2h" },
+								{ value: 4 * 60 * 60_000, label: "4h" },
+							]}
+						/>
+					}
+				/>
+			</Section>
+
+			<Section title="General" index={4}>
+				<Row
+					title="Appearance"
+					control={
+						<Segmented
+							size="sm"
+							label="Appearance"
+							value={settings.theme}
+							onChange={(v) => patch({ theme: v })}
+							options={[
+								{ value: "auto", label: "Auto" },
+								{ value: "light", label: "Light" },
+								{ value: "dark", label: "Dark" },
+							]}
+						/>
+					}
+				/>
+				<DataRow />
+			</Section>
+
+			<div className="flex items-center justify-center gap-4 text-[11px] text-ink-3">
+				<span className="flex items-center gap-1.5">
+					<span className="kbd bg-ink/[0.07]">Space</span> start / stop
+				</span>
+				<span className="flex items-center gap-1.5">
+					<span className="kbd bg-ink/[0.07]">R</span> move now
+				</span>
+				<span className="flex items-center gap-1.5">
+					<span className="kbd bg-ink/[0.07]">⌘1–3</span> tabs
+				</span>
 			</div>
+
+			<VersionFooter info={appInfo} />
 		</div>
 	);
 }

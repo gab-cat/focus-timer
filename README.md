@@ -8,6 +8,15 @@ Focus Timer is built with Electrobun, Bun, React, Vite, and Tailwind CSS. It pro
 
 - Start and stop focus sessions from a simple desktop window
 - Keeps macOS awake during active sessions using `caffeinate`
+- Optionally blocks system sleep entirely (`pmset -a disablesleep 1`) for the session, even with the lid closed, and restores it afterwards, including after a crash
+- **Natural** activity mode: curved, Fitts's-law-timed mouse paths with overshoot and tremor, momentum scrolling that reads like a person, app glances that return to where you were, and a per-session mix so no two sessions look alike
+- Bursty, log-normal timing instead of a flat random interval, plus optional short breaks
+- Backs off instantly if you touch the mouse mid-routine
+- **Fits the app in front**: reading scrolls in browsers and docs, moves stay inside the front window, and it never ⌘-Tabs out of a terminal or code editor
+- **Trackpad-style scrolling**: phased two-finger gestures with momentum (or plain wheel clicks)
+- **Pauses for meetings**: reads macOS Calendar and stays quiet during events with other people or a video link
+- **Learns your rhythm**: optionally records how *you* move (stroke distances, timing, pauses; never keys or screen content) and replays it
+- **Insights**: a 7×24 heatmap of when it moved (or when you were active), the routine mix, and your learned rhythm
 - Runs periodic refresh cycles at randomized intervals
 - Shows the next cycle countdown, last refresh time, and total cycle count
 - Includes a manual refresh button
@@ -54,6 +63,32 @@ Build a canary app:
 bun run build:canary
 ```
 
+## Blocking System Sleep
+
+With **Settings → Keep awake → Block system sleep** on (the default), starting a session runs `pmset -a disablesleep 1` and ending it runs `pmset -a disablesleep 0`. `pmset` needs root, so macOS asks for your password at session start and end.
+
+To skip the prompts, use **Settings → No password → Set up**. This installs `/etc/sudoers.d/focus-timer`, which allows only those two exact `pmset` commands without a password. The rule is checked with `visudo` before it goes live. **Remove** deletes it.
+
+If the app quits unexpectedly mid-session, the next launch restores normal sleep.
+
+## Permissions
+
+| Permission | Why | When it's asked |
+| --- | --- | --- |
+| Accessibility | Posting mouse, scroll and key events | First session |
+| Calendar | Pausing during meetings | When you turn on **Pause when → In a meeting** |
+| Administrator (once, optional) | `pmset disablesleep` | Session start, or once with **Skip the password** |
+
+Rhythm learning needs no extra permission. It polls the cursor position and per-type "time since last input" without an event tap, and keeps only aggregate shapes and timings in `~/Library/Application Support/com.focustimer.app/rhythm.json`.
+
+## Troubleshooting
+
+**`bun dev` exits immediately with no output.** The Electrobun CLI binary ships with an invalid ad-hoc code signature, and newer macOS kills it on launch. The npm wrapper then exits 0 without saying anything. `bun install` (postinstall) and every `dev`/`start`/`build` script now run `scripts/ensure-electrobun-cli.ts`, which re-signs it. To fix it by hand:
+
+```bash
+codesign --force --sign - node_modules/electrobun/bin/electrobun
+```
+
 ## Scripts
 
 | Command | Description |
@@ -64,6 +99,7 @@ bun run build:canary
 | `bun run dev:hmr` | Run Vite HMR and Electrobun together |
 | `bun run hmr` | Start the Vite dev server on port `5173` |
 | `bun run build:canary` | Build the canary desktop app |
+| `bun run ensure-cli` | Re-sign the Electrobun CLI if macOS would kill it |
 
 ## Project Structure
 
@@ -121,6 +157,6 @@ The main window title is configured in `src/bun/index.ts`.
 ## Notes
 
 - The app is currently optimized for macOS.
-- The window is fixed at `380x460`.
-- Refresh timing is randomized between 90 and 180 seconds.
+- The window is fixed at `440x720`, with content drawn under a hidden-inset title bar.
+- Refresh timing defaults to 90–180 seconds (log-normal with occasional quick follow-ups in Natural mode).
 - Built files are generated under `build/`.

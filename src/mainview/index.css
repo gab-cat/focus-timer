@@ -1,3 +1,449 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+/* ── Tokens ─────────────────────────────────────────────────────────────── */
+/* RGB triplets so Tailwind can apply alpha: bg-accent/20 etc. One neutral
+   family, one accent; warn/danger are status colors only. */
+
+:root {
+	--bg: 243 243 240;
+	--bg-2: 236 236 232;
+	--surface: 252 252 250;
+	--surface-2: 246 246 243;
+	--line: 222 222 216;
+	--ink: 22 22 24;
+	--ink-2: 88 88 94;
+	--ink-3: 138 138 144;
+	--accent: 20 158 101;
+	--accent-ink: 250 255 252;
+	--warn: 190 124 18;
+	--danger: 204 66 56;
+	--shadow: 40 40 30;
+	color-scheme: light;
+}
+
+.dark {
+	--bg: 12 12 13;
+	--bg-2: 17 17 19;
+	--surface: 22 22 25;
+	--surface-2: 29 29 33;
+	--line: 40 40 45;
+	--ink: 236 236 238;
+	--ink-2: 160 160 168;
+	--ink-3: 104 104 112;
+	--accent: 112 230 170;
+	--accent-ink: 5 28 17;
+	--warn: 242 188 92;
+	--danger: 238 112 100;
+	--shadow: 0 0 0;
+	color-scheme: dark;
+}
+
+/* ── Base ───────────────────────────────────────────────────────────────── */
+
+html,
+body,
+#root {
+	height: 100%;
+	/* clip (not hidden) so nothing can be scrolled sideways programmatically */
+	overflow: clip;
+}
+
+body {
+	@apply bg-bg font-sans text-ink antialiased;
+	font-feature-settings: "ss01", "cv11";
+	-webkit-font-smoothing: antialiased;
+	overflow: hidden;
+	-webkit-user-select: none;
+	user-select: none;
+	cursor: default;
+}
+
+/* Film grain: breaks up flat fills so surfaces read as material. */
+body::after {
+	content: "";
+	position: fixed;
+	inset: 0;
+	pointer-events: none;
+	z-index: 50;
+	opacity: 0.045;
+	mix-blend-mode: overlay;
+	background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='3' stitchTiles='stitch'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>");
+}
+
+.dark body::after {
+	opacity: 0.07;
+}
+
+::selection {
+	@apply bg-accent/25;
+}
+
+:focus {
+	outline: none;
+}
+
+:focus-visible {
+	outline: 2px solid rgb(var(--accent) / 0.7);
+	outline-offset: 2px;
+	border-radius: 8px;
+}
+
+.tabular {
+	font-variant-numeric: tabular-nums;
+}
+
+.no-scrollbar::-webkit-scrollbar {
+	display: none;
+}
+
+/* ── Ambient light ──────────────────────────────────────────────────────── */
+/* A soft glow behind the dial that follows session state. */
+
+.ambient {
+	position: absolute;
+	inset: 0 0 auto;
+	height: 75%;
+	pointer-events: none;
+	opacity: 0;
+	transition: opacity 900ms cubic-bezier(0.22, 1, 0.36, 1), background 900ms;
+	background: radial-gradient(
+		ellipse 55% 50% at 50% 55%,
+		rgb(var(--accent) / 0.16),
+		transparent 70%
+	);
+}
+
+[data-state="active"] .ambient {
+	opacity: 1;
+}
+
+[data-state="paused"] .ambient {
+	opacity: 0.8;
+	background: radial-gradient(
+		ellipse 55% 50% at 50% 55%,
+		rgb(var(--warn) / 0.12),
+		transparent 70%
+	);
+}
+
+/* ── Motion ─────────────────────────────────────────────────────────────── */
+
+@keyframes breathe {
+	0%,
+	100% {
+		transform: scale(1);
+	}
+	50% {
+		transform: scale(1.025);
+	}
+}
+
+@keyframes ripple {
+	from {
+		transform: scale(0.92);
+		opacity: 0.55;
+	}
+	to {
+		transform: scale(1.55);
+		opacity: 0;
+	}
+}
+
+@keyframes rise {
+	from {
+		opacity: 0;
+		transform: translateY(8px);
+	}
+	to {
+		opacity: 1;
+		transform: none;
+	}
+}
+
+@keyframes fade-out-late {
+	0%,
+	70% {
+		opacity: 1;
+	}
+	100% {
+		opacity: 0;
+	}
+}
+
+@keyframes pulse-dot {
+	0%,
+	100% {
+		box-shadow: 0 0 0 0 rgb(var(--accent) / 0.55);
+	}
+	60% {
+		box-shadow: 0 0 0 6px rgb(var(--accent) / 0);
+	}
+}
+
+.animate-breathe {
+	animation: breathe 5.5s ease-in-out infinite;
+}
+
+.animate-ripple {
+	animation: ripple 1.6s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
+.animate-rise {
+	animation: rise 520ms cubic-bezier(0.22, 1, 0.36, 1) both;
+	animation-delay: calc(var(--i, 0) * 45ms);
+}
+
+.animate-pulse-dot {
+	animation: pulse-dot 2.4s ease-out infinite;
+}
+
+.animate-toast {
+	animation:
+		rise 420ms cubic-bezier(0.22, 1, 0.36, 1) both,
+		fade-out-late 5s linear forwards;
+}
+
+/* Tab changes: the new view slides in from the side you're heading toward
+   while the old one drifts out the other way. */
+@keyframes view-in {
+	from {
+		opacity: 0;
+		transform: translateX(calc(var(--dir, 1) * 22px)) scale(0.985);
+		filter: blur(3px);
+	}
+	to {
+		opacity: 1;
+		transform: none;
+		filter: blur(0);
+	}
+}
+
+@keyframes view-out {
+	to {
+		opacity: 0;
+		transform: translateX(calc(var(--dir, 1) * -22px)) scale(0.985);
+		filter: blur(3px);
+	}
+}
+
+.animate-view-in {
+	animation: view-in 460ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.animate-view-out {
+	animation: view-out 260ms cubic-bezier(0.4, 0, 1, 1) both;
+}
+
+@keyframes pop-in {
+	from {
+		opacity: 0;
+		transform: scale(0.4);
+	}
+	to {
+		opacity: 1;
+		transform: none;
+	}
+}
+
+.animate-cell {
+	animation: pop-in 520ms cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+
+@keyframes reveal-x {
+	from {
+		clip-path: inset(0 100% 0 0 round 999px);
+	}
+	to {
+		clip-path: inset(0 0 0 0 round 999px);
+	}
+}
+
+.animate-reveal {
+	animation: reveal-x 1100ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+/* Text entrance: rises out of a soft blur. --d staggers siblings so a
+   state change plays as a sequence instead of everything popping at once. */
+@keyframes swap-in {
+	from {
+		opacity: 0;
+		transform: translateY(10px) scale(0.97);
+		filter: blur(6px);
+	}
+	to {
+		opacity: 1;
+		transform: none;
+		filter: blur(0);
+	}
+}
+
+.animate-swap {
+	animation: swap-in 720ms cubic-bezier(0.16, 1, 0.3, 1) both;
+	animation-delay: var(--d, 0ms);
+}
+
+@keyframes fade-in {
+	from {
+		opacity: 0;
+	}
+	to {
+		opacity: 1;
+	}
+}
+
+.animate-fade {
+	animation: fade-in 900ms cubic-bezier(0.22, 1, 0.36, 1) both;
+	animation-delay: var(--d, 0ms);
+}
+
+/* New trace marks grow out of the baseline. */
+@keyframes grow-y {
+	from {
+		transform: scaleY(0);
+		opacity: 0;
+	}
+	to {
+		transform: none;
+		opacity: 1;
+	}
+}
+
+.trace-mark {
+	transform-box: fill-box;
+	transform-origin: center;
+	animation: grow-y 700ms cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+
+/* Buddy */
+@keyframes buddy-scan {
+	0%,
+	100% {
+		translate: -4px 0;
+	}
+	50% {
+		translate: 4px 0;
+	}
+}
+
+.buddy-scan > span {
+	animation: buddy-scan 1.3s ease-in-out infinite;
+}
+
+@keyframes buddy-z {
+	0% {
+		opacity: 0;
+		transform: translate(0, 4px) scale(0.6);
+	}
+	25% {
+		opacity: 0.9;
+	}
+	100% {
+		opacity: 0;
+		transform: translate(12px, -18px) scale(1.15);
+	}
+}
+
+.buddy-z {
+	opacity: 0;
+	animation: buddy-z 3.3s ease-out infinite;
+}
+
+@keyframes buddy-steam {
+	0% {
+		opacity: 0;
+		transform: translateY(3px);
+	}
+	40% {
+		opacity: 1;
+	}
+	100% {
+		opacity: 0;
+		transform: translateY(-4px);
+	}
+}
+
+.buddy-steam {
+	animation: buddy-steam 2.2s ease-out infinite;
+}
+
+@keyframes wiggle {
+	0%,
+	100% {
+		transform: rotate(0);
+	}
+	25% {
+		transform: rotate(-14deg) translateX(-1px);
+	}
+	60% {
+		transform: rotate(10deg) translateX(1px);
+	}
+}
+
+.animate-wiggle {
+	animation: wiggle 600ms cubic-bezier(0.34, 1.56, 0.64, 1) infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+	*,
+	*::before,
+	*::after {
+		animation-duration: 1ms !important;
+		animation-iteration-count: 1 !important;
+		transition-duration: 1ms !important;
+	}
+}
+
+/* ── Components ─────────────────────────────────────────────────────────── */
+
+@layer components {
+	/* Raised surface with a 1px top highlight, like light catching an edge. */
+	.panel {
+		@apply rounded-[18px] bg-surface;
+		box-shadow:
+			inset 0 1px 0 rgb(255 255 255 / 0.04),
+			0 0 0 1px rgb(var(--line) / 0.9),
+			0 12px 32px -18px rgb(var(--shadow) / 0.35);
+	}
+
+	:root:not(.dark) .panel {
+		box-shadow:
+			inset 0 1px 0 rgb(255 255 255 / 0.9),
+			0 0 0 1px rgb(var(--line) / 1),
+			0 10px 30px -20px rgb(var(--shadow) / 0.25);
+	}
+
+	.kbd {
+		@apply inline-flex h-[18px] min-w-[18px] items-center justify-center rounded-[5px] px-1 font-mono text-[10px] font-medium;
+		box-shadow: inset 0 -1px 0 rgb(0 0 0 / 0.18);
+	}
+
+	.label {
+		@apply text-[12px] font-medium text-ink-3;
+	}
+
+	/* Quick to press down, springs back on release. */
+	.press {
+		transition:
+			transform 420ms cubic-bezier(0.34, 1.56, 0.64, 1),
+			background-color 220ms ease-out,
+			color 220ms ease-out,
+			opacity 220ms ease-out,
+			box-shadow 300ms ease-out,
+			filter 220ms ease-out;
+	}
+	.press:active:not(:disabled) {
+		transform: scale(0.955);
+		transition-duration: 110ms;
+	}
+	.press-soft {
+		transition:
+			transform 420ms cubic-bezier(0.34, 1.56, 0.64, 1),
+			background-color 220ms ease-out;
+	}
+	.press-soft:active {
+		transform: scale(0.985);
+		transition-duration: 110ms;
+	}
+}
