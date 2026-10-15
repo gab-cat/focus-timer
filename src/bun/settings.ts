@@ -1,6 +1,7 @@
 import { mkdir } from "node:fs/promises";
 import { dirname } from "node:path";
 import {
+	ACTION_TYPES,
 	DEFAULT_SETTINGS,
 	type Settings,
 	type Stats,
@@ -23,7 +24,6 @@ function emptyStats(): Stats {
 		today: { date: todayISO(), count: 0 },
 		history: {},
 		hourly: {},
-		userHourly: {},
 		routines: {},
 	};
 }
@@ -72,6 +72,8 @@ function sanitizeSettings(input: unknown): Settings {
 			(out as Record<string, unknown>)[key] = v as unknown;
 		}
 	}
+	// Modes removed in later versions (e.g. "natural") fall back to the default.
+	if (!ACTION_TYPES.includes(out.actionType)) out.actionType = DEFAULT_SETTINGS.actionType;
 	// Cross-field validation
 	if (out.minDelayMs < 1000) out.minDelayMs = 1000;
 	if (out.maxDelayMs < out.minDelayMs) out.maxDelayMs = out.minDelayMs;
@@ -127,7 +129,6 @@ function sanitizeStats(input: unknown): Stats {
 		today,
 		history,
 		hourly: sanitizeHourly(src.hourly),
-		userHourly: sanitizeHourly(src.userHourly),
 		routines,
 	};
 }
@@ -160,10 +161,8 @@ export function rollStatsDay(s: Stats): Stats {
 		today: { date: today, count: 0 },
 		history: { ...s.history, [s.today.date]: s.today.count },
 		hourly: { ...s.hourly },
-		userHourly: { ...s.userHourly },
 	};
 	trimDays(next.hourly);
-	trimDays(next.userHourly);
 	// Keep only the most recent 7 entries.
 	const keys = Object.keys(next.history).sort();
 	while (keys.length > 7) {

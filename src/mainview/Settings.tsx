@@ -2,20 +2,16 @@ import { useEffect, useState } from "react";
 import type {
 	ActionType,
 	AppInfo,
-	CalendarInfo,
 	Settings as SettingsType,
 	SleepHelperInfo,
 } from "../shared/types";
-import { clock, minuteRange, minutesLabel } from "./format";
+import { minuteRange, minutesLabel } from "./format";
 import {
 	applyUpdate,
 	checkForUpdate,
-	getCalendarInfo,
 	getSleepHelper,
 	installSleepHelper,
-	openCalendarPrivacy,
 	removeSleepHelper,
-	requestCalendarAccess,
 	resetStats,
 	updateSettings,
 } from "./rpc";
@@ -44,15 +40,10 @@ function paceOf(s: SettingsType): Pace {
 }
 
 const MODES: Array<{ value: ActionType; title: string; description: string }> = [
-	{
-		value: "natural",
-		title: "Natural",
-		description: "Curved mouse paths, reading scrolls, quick app glances. Never the same move twice in a row.",
-	},
-	{ value: "mouse", title: "Mouse only", description: "Small and medium cursor moves. Never changes focus." },
-	{ value: "scroll", title: "Scroll", description: "One flick down and back. Net zero." },
+	{ value: "cmdtab", title: "⌘-Tab", description: "Nudges the cursor, then presses ⌘-Tab 1–6 times." },
+	{ value: "mouse", title: "Mouse only", description: "A small cursor nudge. Never changes focus." },
+	{ value: "scroll", title: "Scroll", description: "One line up and back down. Net zero." },
 	{ value: "shift", title: "Shift tap", description: "A single modifier key press. Silent." },
-	{ value: "cmdtab", title: "⌘-Tab", description: "Cycles through apps. Most visible, most disruptive." },
 ];
 
 function ModePicker({ value }: { value: ActionType }) {
@@ -80,11 +71,6 @@ function ModePicker({ value }: { value: ActionType }) {
 						<span className="min-w-0 flex-1">
 							<span className="flex items-center gap-2 text-[13.5px] font-medium tracking-[-0.01em]">
 								{m.title}
-								{m.value === "natural" ? (
-									<span className="rounded-[5px] bg-accent/15 px-1.5 py-[1px] text-[10.5px] font-semibold text-accent">
-										Recommended
-									</span>
-								) : null}
 							</span>
 							<span className="mt-0.5 block text-[12px] leading-[1.45] text-ink-3 [text-wrap:pretty]">
 								{m.description}
@@ -94,63 +80,6 @@ function ModePicker({ value }: { value: ActionType }) {
 				);
 			})}
 		</div>
-	);
-}
-
-function CalendarRow({ settings }: { settings: SettingsType }) {
-	const [info, setInfo] = useState<CalendarInfo | null>(null);
-	const [asking, setAsking] = useState(false);
-
-	useEffect(() => {
-		if (settings.pauseOnMeeting) getCalendarInfo().then(setInfo).catch(() => {});
-	}, [settings.pauseOnMeeting]);
-
-	async function toggle(v: boolean) {
-		patch({ pauseOnMeeting: v });
-		if (!v) return;
-		setAsking(true);
-		try {
-			const current = await getCalendarInfo();
-			setInfo(current.access === "notDetermined" ? await requestCalendarAccess() : current);
-		} finally {
-			setAsking(false);
-		}
-	}
-
-	let detail: React.ReactNode = "Events with other people or a video link. Solo blocks don't count.";
-	if (settings.pauseOnMeeting) {
-		if (asking) detail = "Waiting for Calendar access…";
-		else if (info?.access === "denied" || info?.access === "restricted" || info?.access === "writeOnly") {
-			detail = (
-				<span>
-					<span className="text-warn">Calendar access is off.</span>{" "}
-					<button onClick={() => void openCalendarPrivacy()} className="font-medium text-ink-2 underline decoration-ink/20 underline-offset-2 hover:text-ink">
-						Open Privacy settings
-					</button>
-				</span>
-			);
-		} else if (info?.access === "granted") {
-			detail = info.current
-				? `Now: ${info.current.title}, until ${clock(info.current.end)}`
-				: info.next
-					? `Next: ${info.next.title} at ${clock(info.next.start)}`
-					: "No more meetings today";
-		} else if (info?.access === "notDetermined") {
-			detail = (
-				<button onClick={() => void toggle(true)} className="font-medium text-accent hover:text-accent/80">
-					Allow Calendar access
-				</button>
-			);
-		}
-	}
-
-	return (
-		<Row
-			icon="calendar"
-			title="In a meeting"
-			description={detail}
-			control={<Toggle label="Pause in meetings" value={settings.pauseOnMeeting} onChange={(v) => void toggle(v)} />}
-		/>
 	);
 }
 
@@ -211,7 +140,7 @@ function DataRow() {
 	return (
 		<Row
 			title="Activity history"
-			description="Counts, heatmap and mix. Your rhythm profile is reset from Insights."
+			description="Counts, heatmap and mix."
 			control={
 				confirm ? (
 					<span className="flex gap-3">
@@ -291,7 +220,7 @@ export function Settings({ settings, appInfo }: { settings: SettingsType; appInf
 				<ModePicker value={settings.actionType} />
 			</Section>
 
-			<Section title="Feel" index={1}>
+			<Section title="Timing" index={1}>
 				<Row
 					title="Pace"
 					description={pace === "custom" ? `Custom · ${paceText}` : paceText}
@@ -310,41 +239,6 @@ export function Settings({ settings, appInfo }: { settings: SettingsType; appInf
 						/>
 					}
 				/>
-				<Row
-					icon="window"
-					title="Fit the app in front"
-					description="Reads in browsers and docs, stays inside the front window, never ⌘-Tabs out of a terminal or editor."
-					control={<Toggle label="Fit the app in front" value={settings.appAware} onChange={(v) => patch({ appAware: v })} />}
-				/>
-				<Row
-					icon="scroll"
-					title="Scroll feel"
-					description={settings.scrollStyle === "trackpad" ? "Two-finger swipes with momentum, like a trackpad." : "Plain wheel clicks, like a mouse."}
-					control={
-						<Segmented
-							size="sm"
-							label="Scroll feel"
-							value={settings.scrollStyle}
-							onChange={(v) => patch({ scrollStyle: v })}
-							options={[
-								{ value: "trackpad", label: "Trackpad" },
-								{ value: "wheel", label: "Wheel" },
-							]}
-						/>
-					}
-				/>
-				<Row
-					icon="wave"
-					title="Learn my rhythm"
-					description="Copies your own move distances, speed and pauses. Progress is under Insights."
-					control={<Toggle label="Learn my rhythm" value={settings.learnRhythm} onChange={(v) => patch({ learnRhythm: v })} />}
-				/>
-				<Row
-					icon="cup"
-					title="Short breaks"
-					description="Every 45–110 min, goes quiet for 3–11 min."
-					control={<Toggle label="Short breaks" value={settings.naturalBreaks} onChange={(v) => patch({ naturalBreaks: v })} />}
-				/>
 			</Section>
 
 			<Section title="Pause when" index={2}>
@@ -359,7 +253,6 @@ export function Settings({ settings, appInfo }: { settings: SettingsType; appInf
 					description="Zoom, Teams, FaceTime, Webex, Discord."
 					control={<Toggle label="Pause on calls" value={settings.pauseOnCall} onChange={(v) => patch({ pauseOnCall: v })} />}
 				/>
-				<CalendarRow settings={settings} />
 				<Row
 					icon="battery"
 					title="On battery"

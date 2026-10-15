@@ -222,11 +222,8 @@ export function moodFor(opts: {
 }): Mood {
 	if (!opts.enabled) return "sleep";
 	switch (opts.pauseReason) {
-		case "meeting":
 		case "call":
 			return "listen";
-		case "break":
-			return "coffee";
 		case "lock":
 			return "locked";
 		case "battery":
@@ -234,18 +231,12 @@ export function moodFor(opts: {
 	}
 	if (opts.fresh) {
 		switch (opts.routine) {
-			case "read":
-			case "browse":
 			case "scroll":
 				return "read";
-			case "glance":
 			case "cmdtab":
 				return "glance";
-			case "nudge":
-			case "reach":
 			case "mouse":
 				return "move";
-			case "fidget":
 			case "shift":
 				return "happy";
 		}

@@ -1,8 +1,7 @@
 import { useEffect, useState } from "react";
-import type { AppInfo, JigglerStatus, RhythmInfo, SessionPlan, Settings } from "../shared/types";
+import type { AppInfo, JigglerStatus, Settings } from "../shared/types";
 import { Buddy, moodFor } from "./Buddy";
 import { ago, duration, minutesLabel, mmss, pauseCopy, routineLabel } from "./format";
-import { PlanCard, PlanInput, planAutoStopMs } from "./Planner";
 import { applyUpdate, retrySleepGuard } from "./rpc";
 import { Icon, type IconName, Rolling } from "./ui";
 
@@ -219,15 +218,9 @@ function Dial({
 }
 
 // Seismograph of the last 30 minutes: one stroke per move, height by how
-// "big" the routine was. Irregular spacing is the point.
+// "big" the action was.
 const TRACE_WINDOW = 30 * 60_000;
 const TRACE_H: Record<string, number> = {
-	nudge: 10,
-	fidget: 7,
-	reach: 17,
-	read: 22,
-	browse: 26,
-	glance: 30,
 	cmdtab: 24,
 	mouse: 12,
 	scroll: 18,
@@ -329,62 +322,37 @@ function Chip({
 }
 
 // What the stand-in says it just did.
-function narrate(routine: string | null, app: string | null): string {
-	const where = app ? ` in ${app}` : "";
+function narrate(routine: string | null): string {
 	switch (routine) {
-		case "read":
 		case "scroll":
-			return `Reading along${where}`;
-		case "browse":
-			return `Browsing${where}`;
-		case "glance":
-			return "Peeked at another app";
+			return "Scrolled a line";
 		case "cmdtab":
 			return "Switched apps";
-		case "reach":
-			return `Reached across${where}`;
-		case "nudge":
 		case "mouse":
 			return "Nudged the cursor";
-		case "fidget":
 		case "shift":
-			return "Fidgeted a little";
+			return "Tapped Shift";
 		default:
 			return routineLabel(routine);
 	}
 }
 
-export type PlannerProps = {
-	// Apple Intelligence is usable; without it the planner input is hidden.
-	available: boolean;
-	draft: string;
-	plan: SessionPlan | null;
-	done: boolean[];
-	onDraft: (text: string) => void;
-	onPlan: (plan: SessionPlan | null) => void;
-	onToggleStep: (i: number) => void;
-};
-
 export function Focus({
 	status,
 	settings,
 	appInfo,
-	rhythm,
 	busy,
 	moving,
 	onToggle,
 	onMoveNow,
-	planner,
 }: {
 	status: JigglerStatus;
 	settings: Settings;
 	appInfo: AppInfo;
-	rhythm: RhythmInfo | null;
 	busy: boolean;
 	moving: boolean;
 	onToggle: () => void;
 	onMoveNow: () => void;
-	planner: PlannerProps;
 }) {
 	const now = Date.now();
 	const pause = status.enabled ? pauseCopy(status) : null;
@@ -458,7 +426,7 @@ export function Focus({
 					</span>
 					{status.enabled ? (
 						<span className="animate-swap text-[12.5px] text-ink-3" style={{ ["--d" as string]: "80ms" }}>
-							· {settings.actionType === "natural" ? "Natural" : routineLabel(settings.actionType)}
+							· {routineLabel(settings.actionType)}
 						</span>
 					) : null}
 				</div>
@@ -536,7 +504,7 @@ export function Focus({
 							className={`animate-swap inline-flex items-center gap-1.5 text-[12.5px] ${fresh ? "text-ink" : "text-ink-2"}`}
 						>
 							<span className={`h-1.5 w-1.5 rounded-full transition-colors duration-700 ${fresh ? "bg-accent" : "bg-ink/25"}`} />
-							<span className="font-medium">{narrate(status.lastRoutine, status.lastApp)}</span>
+							<span className="font-medium">{narrate(status.lastRoutine)}</span>
 							<span className="text-ink-3">· {ago(status.lastActionAt)}</span>
 						</span>
 					) : (
@@ -552,21 +520,7 @@ export function Focus({
 			</div>
 
 			<div className="space-y-4">
-				{/* The plan takes the trace's place while there is one; before a
-				    session, so does the input that makes it. */}
-				{planner.plan ? (
-					<PlanCard
-						plan={planner.plan}
-						done={planner.done}
-						autoStopAt={status.enabled ? status.autoStopAt : null}
-						onToggleStep={planner.onToggleStep}
-						onClear={status.enabled ? null : () => planner.onPlan(null)}
-					/>
-				) : planner.available && !status.enabled ? (
-					<PlanInput draft={planner.draft} onDraft={planner.onDraft} onPlan={planner.onPlan} />
-				) : (
-					<Trace recent={status.recent} active={state === "active"} />
-				)}
+				<Trace recent={status.recent} active={state === "active"} />
 
 				<div className="flex min-h-7 flex-wrap items-center gap-1.5">
 					{status.enabled && settings.preventSystemSleep ? (
@@ -582,9 +536,6 @@ export function Focus({
 					) : null}
 					{status.enabled && status.autoStopAt ? (
 						<Chip icon="timer" index={1}>{duration(status.autoStopAt - now)} left</Chip>
-					) : null}
-					{status.enabled && settings.actionType === "natural" && settings.learnRhythm && rhythm?.ready ? (
-						<Chip icon="wave" tone="accent" index={2}>Your rhythm</Chip>
 					) : null}
 					{!status.enabled ? (
 						<span className="animate-swap text-[11.5px] text-ink-3" style={{ ["--d" as string]: "300ms" }}>
@@ -607,11 +558,7 @@ export function Focus({
 					>
 						<span key={status.enabled ? "end" : "start"} className="animate-swap flex items-center gap-2">
 							<Icon name={status.enabled ? "stop" : "play"} size={16} />
-							{status.enabled
-								? "End session"
-								: planner.plan
-									? `Start ${minutesLabel(planAutoStopMs(planner.plan))} session`
-									: "Start session"}
+							{status.enabled ? "End session" : "Start session"}
 						</span>
 						<span
 							className={`kbd absolute right-3.5 transition-colors duration-300 ${

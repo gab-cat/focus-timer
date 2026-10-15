@@ -15,8 +15,6 @@ permissions:
 
 jobs:
   build-macos-arm64:
-    # macOS 26 image: its Xcode has the SDK with FoundationModels, which
-    # native/ai-helper (the Apple Intelligence bridge) compiles against.
     runs-on: macos-26
     steps:
       - uses: actions/checkout@v4

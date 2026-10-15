@@ -15,7 +15,7 @@ export default {
 		baseUrl: "https://github.com/gab-cat/focus-timer/releases/latest/download",
 	},
 	scripts: {
-		// Adds Calendar / Apple Events usage descriptions to Info.plist.
+		// Adds the Apple Events usage description to Info.plist.
 		postBuild: "scripts/post-build-plist.ts",
 		// Runs after the DMG wrapper bundle is built, before the DMG is created.
 		// Ad-hoc signs the wrapper so Gatekeeper shows "unidentified developer"
@@ -30,8 +30,6 @@ export default {
 			"dist/assets": "views/mainview/assets",
 			"dist/tray-icon.png": "views/mainview/tray-icon.png",
 			"dist/favicon.png": "views/mainview/favicon.png",
-			// Apple Intelligence bridge, built by scripts/build-ai-helper.ts.
-			"native/ai-helper/.build/ai-helper": "native/ai-helper",
 		},
 		// Ignore Vite output in watch mode — HMR handles view rebuilds separately
 		watchIgnore: ["dist/**"],

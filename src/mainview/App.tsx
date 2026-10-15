@@ -2,25 +2,18 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
 	type AppInfo,
 	DEFAULT_SETTINGS,
-	type IntelligenceInfo,
 	type JigglerStatus,
-	type RhythmInfo,
-	type SessionPlan,
 	type Settings,
 	type Stats,
 } from "../shared/types";
 import { Focus } from "./Focus";
 import { Insights } from "./Insights";
-import { planAutoStopMs } from "./Planner";
 import {
 	getAppInfo,
-	getIntelligenceInfo,
-	getRhythm,
 	getSettings,
 	getStats,
 	getStatus,
 	onAppInfo,
-	onRhythm,
 	onSettings,
 	onStats,
 	onStatus,
@@ -40,9 +33,7 @@ const INITIAL_STATUS: JigglerStatus = {
 	sessionStartedAt: null,
 	autoStopAt: null,
 	pauseReason: null,
-	pauseDetail: null,
 	lastRoutine: null,
-	lastApp: null,
 	sleepGuard: "off",
 	recent: [],
 };
@@ -63,7 +54,6 @@ const INITIAL_STATS: Stats = {
 	today: { date: "", count: 0 },
 	history: {},
 	hourly: {},
-	userHourly: {},
 	routines: {},
 };
 
@@ -75,7 +65,6 @@ function App() {
 	const [appInfo, setAppInfo] = useState<AppInfo>(INITIAL_APP_INFO);
 	const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
 	const [stats, setStats] = useState<Stats>(INITIAL_STATS);
-	const [rhythm, setRhythm] = useState<RhythmInfo | null>(null);
 	const [view, setView] = useState<{ tab: Tab; dir: number; n: number }>({ tab: "focus", dir: 1, n: 0 });
 	const [leaving, setLeaving] = useState<{ tab: Tab; dir: number; n: number } | null>(null);
 	const tab = view.tab;
@@ -97,11 +86,6 @@ function App() {
 	const [busy, setBusy] = useState(false);
 	const [moving, setMoving] = useState(false);
 	const [, force] = useState(0);
-	// Session planner. Lives here so it survives tab switches.
-	const [intel, setIntel] = useState<IntelligenceInfo | null>(null);
-	const [draft, setDraft] = useState("");
-	const [plan, setPlan] = useState<SessionPlan | null>(null);
-	const [done, setDone] = useState<boolean[]>([]);
 
 	useTheme(settings.theme);
 
@@ -110,61 +94,30 @@ function App() {
 		getAppInfo().then(setAppInfo).catch(() => {});
 		getSettings().then(setSettings).catch(() => {});
 		getStats().then(setStats).catch(() => {});
-		getRhythm().then(setRhythm).catch(() => {});
 		const offs = [
 			onStatus(setStatus),
 			onAppInfo(setAppInfo),
 			onSettings(setSettings),
 			onStats(setStats),
-			onRhythm(setRhythm),
 		];
 		const tick = setInterval(() => force((n) => n + 1), 1000);
-		// Re-check on focus: Apple Intelligence may have been turned on, or
-		// its model finished downloading, while we were in the background.
-		const checkIntel = () => {
-			getIntelligenceInfo().then(setIntel).catch(() => {});
-		};
-		checkIntel();
-		window.addEventListener("focus", checkIntel);
 		return () => {
 			for (const off of offs) off();
 			clearInterval(tick);
-			window.removeEventListener("focus", checkIntel);
 		};
 	}, []);
 
 	const statusRef = useRef(status);
 	statusRef.current = status;
-	const planRef = useRef(plan);
-	planRef.current = plan;
 
 	const toggle = useCallback(async () => {
 		setBusy(true);
 		try {
-			const starting = !statusRef.current.enabled;
-			const planned = starting && planRef.current ? planAutoStopMs(planRef.current) : null;
-			setStatus(await setEnabled(starting, planned));
+			setStatus(await setEnabled(!statusRef.current.enabled));
 		} catch {
 		} finally {
 			setBusy(false);
 		}
-	}, []);
-
-	// A plan covers one session: clear it once that session ends, however
-	// it ends (button, tray, auto-stop).
-	const wasEnabled = useRef(status.enabled);
-	useEffect(() => {
-		if (wasEnabled.current && !status.enabled) {
-			setPlan(null);
-			setDone([]);
-			setDraft("");
-		}
-		wasEnabled.current = status.enabled;
-	}, [status.enabled]);
-
-	const choosePlan = useCallback((next: SessionPlan | null) => {
-		setPlan(next);
-		setDone(next ? next.steps.map(() => false) : []);
 	}, []);
 
 	const moveNow = useCallback(async () => {
@@ -210,23 +163,13 @@ function App() {
 				status={status}
 				settings={settings}
 				appInfo={appInfo}
-				rhythm={rhythm}
 				busy={busy}
 				moving={moving}
 				onToggle={() => void toggle()}
 				onMoveNow={() => void moveNow()}
-				planner={{
-					available: intel?.available ?? false,
-					draft,
-					plan,
-					done,
-					onDraft: setDraft,
-					onPlan: choosePlan,
-					onToggleStep: (i) => setDone((d) => d.map((v, j) => (j === i ? !v : v))),
-				}}
 			/>
 		) : t === "insights" ? (
-			<Insights stats={stats} rhythm={rhythm} settings={settings} />
+			<Insights stats={stats} />
 		) : (
 			<SettingsView settings={settings} appInfo={appInfo} />
 		);

@@ -28,8 +28,6 @@ function statusLine(status: JigglerStatus): string {
 			battery: "Paused — battery",
 			call: "Paused — on call",
 			lock: "Paused — screen locked",
-			break: "On a short break",
-			meeting: "Paused — in a meeting",
 		};
 		return map[status.pauseReason];
 	}

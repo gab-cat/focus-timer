@@ -9,15 +9,9 @@ Focus Timer is built with Electrobun, Bun, React, Vite, and Tailwind CSS. It pro
 - Start and stop focus sessions from a simple desktop window
 - Keeps macOS awake during active sessions using `caffeinate`
 - Optionally blocks system sleep entirely (`pmset -a disablesleep 1`) for the session, even with the lid closed, and restores it afterwards, including after a crash
-- **Natural** activity mode: curved, Fitts's-law-timed mouse paths with overshoot and tremor, momentum scrolling that reads like a person, app glances that return to where you were, and a per-session mix so no two sessions look alike
-- Bursty, log-normal timing instead of a flat random interval, plus optional short breaks
-- Backs off instantly if you touch the mouse mid-routine
-- **Fits the app in front**: reading scrolls in browsers and docs, moves stay inside the front window, and it never ⌘-Tabs out of a terminal or code editor
-- **Trackpad-style scrolling**: phased two-finger gestures with momentum (or plain wheel clicks)
-- **Pauses for meetings**: reads macOS Calendar and stays quiet during events with other people or a video link
-- **Learns your rhythm**: optionally records how *you* move (stroke distances, timing, pauses; never keys or screen content) and replays it
-- **Plan a session** with Apple Intelligence: describe what you're working on and get a title, a length and a sub-goal checklist; the session auto-stops when the plan ends, and before your next meeting when Calendar access is on. Runs on-device; hidden when Apple Intelligence isn't available
-- **Insights**: a 7×24 heatmap of when it moved (or when you were active), the routine mix, and your learned rhythm
+- Four actions: ⌘-Tab (default), Mouse only, Scroll, Shift tap
+- Acts only once you've been idle for a while, and pauses when the screen is locked, you're on a call, or (optionally) on battery
+- **Insights**: today / 7-day / all-time totals, a 7×24 heatmap of when it moved, and the action mix
 - Runs periodic refresh cycles at randomized intervals
 - Shows the next cycle countdown, last refresh time, and total cycle count
 - Includes a manual refresh button
@@ -35,11 +29,8 @@ Use it only in ways that comply with your workplace, client, school, and softwar
 - macOS
 - Bun
 - Electrobun dependencies installed through this project
-- To build: the macOS 26 SDK (Xcode 26 or matching Command Line Tools), for the Swift helper in `native/ai-helper`
 
 This app uses macOS command-line tools including `caffeinate` and `osascript`.
-
-The session planner uses Apple Intelligence, which needs an Apple Silicon Mac on macOS 26 or later with Apple Intelligence turned on in **System Settings → Apple Intelligence & Siri**. Without it, the rest of the app works the same and the planner stays hidden. Plans are generated on your Mac by Apple's on-device model; nothing is sent to a server.
 
 ## Getting Started
 
@@ -80,10 +71,7 @@ If the app quits unexpectedly mid-session, the next launch restores normal sleep
 | Permission | Why | When it's asked |
 | --- | --- | --- |
 | Accessibility | Posting mouse, scroll and key events | First session |
-| Calendar | Pausing during meetings | When you turn on **Pause when → In a meeting** |
 | Administrator (once, optional) | `pmset disablesleep` | Session start, or once with **Skip the password** |
-
-Rhythm learning needs no extra permission. It polls the cursor position and per-type "time since last input" without an event tap, and keeps only aggregate shapes and timings in `~/Library/Application Support/com.focustimer.app/rhythm.json`.
 
 ## Troubleshooting
 
@@ -162,5 +150,5 @@ The main window title is configured in `src/bun/index.ts`.
 
 - The app is currently optimized for macOS.
 - The window is fixed at `440x720`, with content drawn under a hidden-inset title bar.
-- Refresh timing defaults to 90–180 seconds (log-normal with occasional quick follow-ups in Natural mode).
+- Refresh timing defaults to 90–180 seconds, picked uniformly at random.
 - Built files are generated under `build/`.

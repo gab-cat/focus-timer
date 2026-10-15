@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
-// Adds Info.plist keys Electrobun doesn't generate. macOS refuses (or kills)
-// Calendar access requests from an app without a usage description, and the
-// osascript helper we spawn inherits this app's TCC identity.
+// Adds Info.plist keys Electrobun doesn't generate. The osascript helper we
+// spawn inherits this app's TCC identity, so the Apple Events prompt shows
+// this description.
 
 import { readdirSync } from "node:fs";
 import { join } from "node:path";
@@ -11,12 +11,7 @@ if (process.env.ELECTROBUN_OS !== "macos" || process.platform !== "darwin" || !b
 	process.exit(0);
 }
 
-const CALENDAR_REASON =
-	"Focus Timer pauses activity while you're in a meeting. Event details never leave your Mac.";
-
 const KEYS: Record<string, string> = {
-	NSCalendarsUsageDescription: CALENDAR_REASON,
-	NSCalendarsFullAccessUsageDescription: CALENDAR_REASON,
 	NSAppleEventsUsageDescription: "Focus Timer sends keystrokes like ⌘-Tab during sessions.",
 };
 

@@ -6,31 +6,11 @@ import type {
 	JigglerRPC,
 	JigglerStatus,
 	PauseReason,
-	RhythmInfo,
 	Settings,
 	Stats,
 	UpdatePhase,
 } from "../shared/types";
-import { resetPersona, runAction } from "./actions";
-import {
-	currentMeeting,
-	getCalendarInfo,
-	openCalendarPrivacy,
-	requestCalendarAccess,
-} from "./calendar";
-import { breakGapMs, breakLengthMs, naturalDelay } from "./humanize";
-import { getIntelligenceInfo, planSession, stopIntelligence } from "./intelligence";
-import {
-	initRhythm,
-	markSyntheticEnd,
-	markSyntheticStart,
-	onActiveMinute,
-	onRhythmChange,
-	resetRhythm,
-	rhythmInfo,
-	setRhythmLearning,
-	stopRhythm,
-} from "./rhythm";
+import { runAction } from "./actions";
 import {
 	bumpHour,
 	emptyStatsValue,
@@ -66,14 +46,6 @@ let caffeinate: Subprocess | null = null;
 let nextTimer: ReturnType<typeof setTimeout> | null = null;
 let autoStopTimer: ReturnType<typeof setTimeout> | null = null;
 let mainWindow: BrowserWindow | null = null;
-// End of our most recent synthetic action; 0 when unknown or the user
-// interrupted it. Lets the idle check tell our own input from the user's.
-let lastSyntheticAt = 0;
-let nextBreakAt: number | null = null;
-let breakUntil: number | null = null;
-// Auto-stop for the current session when it came from a plan rather than
-// the setting.
-let sessionAutoStopMs: number | null = null;
 
 const status: JigglerStatus = {
 	enabled: false,
@@ -84,9 +56,7 @@ const status: JigglerStatus = {
 	sessionStartedAt: null,
 	autoStopAt: null,
 	pauseReason: null,
-	pauseDetail: null,
 	lastRoutine: null,
-	lastApp: null,
 	sleepGuard: "off",
 	recent: [],
 };
@@ -135,13 +105,6 @@ function pushStats() {
 	rpc?.send.statsChanged({ ...stats });
 }
 
-function pushRhythm(info: RhythmInfo) {
-	const rpc = mainWindow?.webview.rpc as
-		| { send: { rhythmChanged: (i: RhythmInfo) => void } }
-		| undefined;
-	rpc?.send.rhythmChanged(info);
-}
-
 function setUpdatePhase(phase: UpdatePhase, extra?: Partial<AppInfo>) {
 	appInfo.updatePhase = phase;
 	if (extra) Object.assign(appInfo, extra);
@@ -152,97 +115,28 @@ function randomDelay() {
 	const { minDelayMs, maxDelayMs } = settings;
 	const lo = Math.max(1000, minDelayMs);
 	const hi = Math.max(lo, maxDelayMs);
-	if (settings.actionType === "natural") return naturalDelay(lo, hi);
 	return Math.floor(lo + Math.random() * (hi - lo));
 }
 
-// True once the user has been away long enough for us to act. Our own
-// synthetic input resets the HID idle clock too, so when nothing has happened
-// since our last action we treat the user as still away.
-async function userIsAway(): Promise<{ away: boolean; idle: number }> {
-	const idle = await getIdleMs();
-	if (idle >= settings.idleThresholdMs) return { away: true, idle };
-	const lastInputWasOurs =
-		lastSyntheticAt > 0 && idle + 1_500 >= Date.now() - lastSyntheticAt;
-	return { away: lastInputWasOurs, idle };
-}
-
-// Handles natural breaks. Returns a delay to wait if we're on a break.
-function breakDelay(): number | null {
-	const now = Date.now();
-	if (breakUntil) {
-		if (now < breakUntil) return breakUntil - now;
-		breakUntil = null;
-		nextBreakAt = now + breakGapMs();
-		if (status.pauseReason === "break") setPause(null);
-		pushStatus();
-		return null;
-	}
-	if (settings.naturalBreaks && nextBreakAt && now >= nextBreakAt) {
-		breakUntil = now + breakLengthMs();
-		setPause("break");
-		return breakUntil - now;
-	}
-	return null;
-}
-
-function setPause(reason: PauseReason, detail: string | null = null) {
-	status.pauseReason = reason;
-	status.pauseDetail = reason ? detail : null;
-}
-
-function endBreak() {
-	breakUntil = null;
-	if (status.pauseReason === "break") setPause(null);
-}
-
-type Pause = { reason: PauseReason; detail: string | null; recheckMs: number };
-
-async function checkPause(): Promise<Pause | null> {
-	if (settings.pauseOnLock && (await isScreenLocked()))
-		return { reason: "lock", detail: null, recheckMs: 60_000 };
-	if (settings.pauseOnBattery && (await isOnBattery()))
-		return { reason: "battery", detail: null, recheckMs: 60_000 };
-	if (settings.pauseOnCall && (await isOnCall()))
-		return { reason: "call", detail: null, recheckMs: 60_000 };
-	if (settings.pauseOnMeeting) {
-		const meeting = await currentMeeting();
-		if (meeting) {
-			// Wake shortly after it ends, but re-check at least every minute.
-			const untilEnd = meeting.end - Date.now() + 5_000 + Math.random() * 20_000;
-			return {
-				reason: "meeting",
-				detail: JSON.stringify({ title: meeting.title, end: meeting.end }),
-				recheckMs: Math.max(5_000, Math.min(60_000, untilEnd)),
-			};
-		}
-	}
+async function checkPauseReason(): Promise<PauseReason> {
+	if (settings.pauseOnLock && (await isScreenLocked())) return "lock";
+	if (settings.pauseOnBattery && (await isOnBattery())) return "battery";
+	if (settings.pauseOnCall && (await isOnCall())) return "call";
 	return null;
 }
 
 async function performJiggle() {
-	markSyntheticStart();
-	let result;
-	try {
-		result = await runAction({
-			type: settings.actionType,
-			appAware: settings.appAware,
-			scrollStyle: settings.scrollStyle,
-		});
-	} finally {
-		markSyntheticEnd();
-	}
-	lastSyntheticAt = result.interrupted ? 0 : Date.now();
-	status.lastRoutine = result.routine;
-	status.lastApp = result.app;
+	const routine = settings.actionType;
+	await runAction(routine);
+	status.lastRoutine = routine;
 	status.actionCount += 1;
 	status.lastActionAt = Date.now();
-	status.recent = [...status.recent, { at: status.lastActionAt, routine: result.routine }].slice(-60);
+	status.recent = [...status.recent, { at: status.lastActionAt, routine }].slice(-60);
 	stats = rollStatsDay(stats);
 	stats.totalActions += 1;
 	stats.today.count += 1;
 	bumpHour(stats.hourly);
-	stats.routines[result.routine] = (stats.routines[result.routine] ?? 0) + 1;
+	stats.routines[routine] = (stats.routines[routine] ?? 0) + 1;
 	void saveStats(stats);
 	pushStats();
 }
@@ -256,25 +150,21 @@ function scheduleNext(overrideDelay?: number) {
 	nextTimer = setTimeout(async () => {
 		if (!status.enabled) return;
 		try {
-			const onBreak = breakDelay();
-			if (onBreak != null) {
-				scheduleNext(onBreak);
-				return;
-			}
-			const pause = await checkPause();
-			if (pause) {
-				if (status.pauseReason !== pause.reason || status.pauseDetail !== pause.detail) {
-					setPause(pause.reason, pause.detail);
+			const reason = await checkPauseReason();
+			if (reason) {
+				if (status.pauseReason !== reason) {
+					status.pauseReason = reason;
+					pushStatus();
 				}
-				scheduleNext(pause.recheckMs);
+				scheduleNext(60_000);
 				return;
 			}
 			if (status.pauseReason) {
-				setPause(null);
+				status.pauseReason = null;
 				pushStatus();
 			}
-			const { away, idle } = await userIsAway();
-			if (!away) {
+			const idle = await getIdleMs();
+			if (idle < settings.idleThresholdMs) {
 				const wait =
 					settings.idleThresholdMs - idle + 5_000 + Math.floor(Math.random() * 10_000);
 				scheduleNext(wait);
@@ -310,30 +200,23 @@ function clearAutoStop() {
 
 function scheduleAutoStop() {
 	clearAutoStop();
-	const ms = sessionAutoStopMs ?? settings.autoStopMs;
-	if (!ms || ms <= 0) return;
-	status.autoStopAt = Date.now() + ms;
+	if (!settings.autoStopMs || settings.autoStopMs <= 0) return;
+	status.autoStopAt = Date.now() + settings.autoStopMs;
 	autoStopTimer = setTimeout(() => {
 		autoStopTimer = null;
 		if (status.enabled) setEnabled(false);
-	}, ms);
+	}, settings.autoStopMs);
 }
 
-function setEnabled(enabled: boolean, autoStopMs: number | null = null): JigglerStatus {
+function setEnabled(enabled: boolean): JigglerStatus {
 	if (enabled === status.enabled) return { ...status };
 	status.enabled = enabled;
 	if (enabled) {
-		sessionAutoStopMs = autoStopMs && autoStopMs > 0 ? autoStopMs : null;
 		status.sessionStartedAt = Date.now();
 		status.actionCount = 0;
-		setPause(null);
+		status.pauseReason = null;
 		status.lastRoutine = null;
-		status.lastApp = null;
 		status.recent = [];
-		lastSyntheticAt = 0;
-		endBreak();
-		nextBreakAt = Date.now() + breakGapMs();
-		resetPersona();
 		scheduleAutoStop();
 		startCaffeinate();
 		void requestSleepGuard(settings.preventSystemSleep);
@@ -344,11 +227,8 @@ function setEnabled(enabled: boolean, autoStopMs: number | null = null): Jiggler
 		status.nextActionAt = null;
 		status.waitStartedAt = null;
 		status.sessionStartedAt = null;
-		setPause(null);
-		endBreak();
-		nextBreakAt = null;
+		status.pauseReason = null;
 		clearAutoStop();
-		sessionAutoStopMs = null;
 		stopCaffeinate();
 		void requestSleepGuard(false);
 		pushStatus();
@@ -369,8 +249,7 @@ async function triggerNow(): Promise<JigglerStatus> {
 
 function applySettingsSideEffects(prev: Settings) {
 	if (prev.autoStopMs !== settings.autoStopMs) {
-		// A planned session keeps its own length.
-		if (status.enabled && sessionAutoStopMs == null) scheduleAutoStop();
+		if (status.enabled) scheduleAutoStop();
 	}
 	if (
 		status.enabled &&
@@ -382,21 +261,6 @@ function applySettingsSideEffects(prev: Settings) {
 	}
 	if (status.enabled && prev.preventSystemSleep !== settings.preventSystemSleep) {
 		void requestSleepGuard(settings.preventSystemSleep);
-	}
-	if (prev.learnRhythm !== settings.learnRhythm) {
-		setRhythmLearning(settings.learnRhythm);
-	}
-	if (status.enabled && prev.pauseOnMeeting !== settings.pauseOnMeeting) {
-		// Re-evaluate right away rather than waiting out the current timer.
-		if (status.pauseReason === "meeting" && !settings.pauseOnMeeting) setPause(null);
-		scheduleNext(1_000);
-	}
-	if (status.enabled && prev.naturalBreaks !== settings.naturalBreaks) {
-		nextBreakAt = Date.now() + breakGapMs();
-		if (!settings.naturalBreaks && breakUntil) {
-			endBreak();
-			scheduleNext();
-		}
 	}
 }
 
@@ -471,7 +335,7 @@ Updater.onStatusChange((entry) => {
 const rpc = BrowserView.defineRPC<JigglerRPC>({
 	handlers: {
 		requests: {
-			setEnabled: ({ enabled, autoStopMs }) => setEnabled(enabled, autoStopMs ?? null),
+			setEnabled: ({ enabled }) => setEnabled(enabled),
 			getStatus: () => ({ ...status }),
 			triggerNow: () => triggerNow(),
 			getAppInfo: () => ({ ...appInfo }),
@@ -495,13 +359,6 @@ const rpc = BrowserView.defineRPC<JigglerRPC>({
 			getSleepHelper: () => getHelperInfo(),
 			installSleepHelper: () => installHelper(),
 			removeSleepHelper: () => removeHelper(),
-			getCalendarInfo: () => getCalendarInfo(),
-			requestCalendarAccess: () => requestCalendarAccess(),
-			openCalendarPrivacy: () => openCalendarPrivacy(),
-			getRhythm: () => rhythmInfo(),
-			resetRhythm: () => resetRhythm(),
-			getIntelligenceInfo: () => getIntelligenceInfo(),
-			planSession: ({ text }) => planSession(text),
 		},
 		messages: {},
 	},
@@ -550,15 +407,6 @@ onSleepGuardChange((state) => {
 });
 // Undo a sleep block left behind if the app crashed mid-session.
 void recoverSleepGuard();
-
-onRhythmChange(pushRhythm);
-onActiveMinute(() => {
-	stats = rollStatsDay(stats);
-	bumpHour(stats.userHourly);
-	void saveStats(stats);
-	pushStats();
-});
-await initRhythm(settings.learnRhythm);
 
 const url = await getMainViewUrl();
 const startPos = resolveStartPosition();
@@ -650,8 +498,6 @@ function shutdown() {
 	if (shuttingDown) return;
 	shuttingDown = true;
 	stopCaffeinate();
-	stopRhythm();
-	stopIntelligence();
 	releaseSleepGuardSync();
 }
 

@@ -1,11 +1,7 @@
 import { Electroview } from "electrobun/view";
 import type {
 	AppInfo,
-	CalendarInfo,
-	IntelligenceInfo,
 	JigglerRPC,
-	PlanResult,
-	RhythmInfo,
 	JigglerStatus,
 	Settings,
 	SleepHelperInfo,
@@ -16,18 +12,11 @@ type StatusListener = (s: JigglerStatus) => void;
 type AppInfoListener = (i: AppInfo) => void;
 type SettingsListener = (s: Settings) => void;
 type StatsListener = (s: Stats) => void;
-type RhythmListener = (r: RhythmInfo) => void;
 
 const statusListeners = new Set<StatusListener>();
 const appInfoListeners = new Set<AppInfoListener>();
 const settingsListeners = new Set<SettingsListener>();
 const statsListeners = new Set<StatsListener>();
-const rhythmListeners = new Set<RhythmListener>();
-
-export function onRhythm(fn: RhythmListener) {
-	rhythmListeners.add(fn);
-	return () => rhythmListeners.delete(fn);
-}
 
 export function onStatus(fn: StatusListener) {
 	statusListeners.add(fn);
@@ -67,20 +56,14 @@ const rpc = Electroview.defineRPC<JigglerRPC>({
 			statsChanged: (s) => {
 				for (const fn of statsListeners) fn(s);
 			},
-			rhythmChanged: (r) => {
-				for (const fn of rhythmListeners) fn(r);
-			},
 		},
 	},
 });
 
 export const electroview = new Electroview({ rpc });
 
-export async function setEnabled(
-	enabled: boolean,
-	autoStopMs: number | null = null,
-): Promise<JigglerStatus> {
-	return electroview.rpc!.request.setEnabled({ enabled, autoStopMs });
+export async function setEnabled(enabled: boolean): Promise<JigglerStatus> {
+	return electroview.rpc!.request.setEnabled({ enabled });
 }
 
 export async function getStatus(): Promise<JigglerStatus> {
@@ -133,32 +116,4 @@ export async function installSleepHelper(): Promise<SleepHelperInfo> {
 
 export async function removeSleepHelper(): Promise<SleepHelperInfo> {
 	return electroview.rpc!.request.removeSleepHelper({});
-}
-
-export async function getCalendarInfo(): Promise<CalendarInfo> {
-	return electroview.rpc!.request.getCalendarInfo({});
-}
-
-export async function requestCalendarAccess(): Promise<CalendarInfo> {
-	return electroview.rpc!.request.requestCalendarAccess({});
-}
-
-export async function openCalendarPrivacy(): Promise<void> {
-	return electroview.rpc!.request.openCalendarPrivacy({});
-}
-
-export async function getRhythm(): Promise<RhythmInfo> {
-	return electroview.rpc!.request.getRhythm({});
-}
-
-export async function resetRhythm(): Promise<RhythmInfo> {
-	return electroview.rpc!.request.resetRhythm({});
-}
-
-export async function getIntelligenceInfo(): Promise<IntelligenceInfo> {
-	return electroview.rpc!.request.getIntelligenceInfo({});
-}
-
-export async function planSession(text: string): Promise<PlanResult> {
-	return electroview.rpc!.request.planSession({ text });
 }

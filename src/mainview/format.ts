@@ -27,10 +27,6 @@ export function ago(ts: number | null) {
 	return `${Math.floor(m / 60)}h ago`;
 }
 
-export function clock(ts: number) {
-	return new Date(ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-}
-
 export function minutesLabel(ms: number) {
 	if (ms < 60_000) return `${Math.round(ms / 1000)} s`;
 	const m = Math.round(ms / 60_000);
@@ -50,17 +46,10 @@ export function minuteRange(lo: number, hi: number) {
 }
 
 export const ROUTINE_LABELS: Record<string, string> = {
-	nudge: "Nudge",
-	reach: "Reach",
-	read: "Reading",
-	glance: "App glance",
-	fidget: "Fidget",
-	browse: "Browse",
 	cmdtab: "⌘-Tab",
 	mouse: "Mouse",
 	scroll: "Scroll",
 	shift: "Shift tap",
-	natural: "Natural",
 };
 
 export const routineLabel = (r: string | null) => (r ? (ROUTINE_LABELS[r] ?? r) : "");
@@ -75,19 +64,6 @@ export function pauseCopy(status: JigglerStatus): PauseCopy | null {
 			return { title: "On a call", detail: "Resumes when it ends" };
 		case "lock":
 			return { title: "Screen locked", detail: "Resumes when unlocked" };
-		case "break":
-			return {
-				title: "Short break",
-				detail: status.nextActionAt ? `Back in ${mmss(status.nextActionAt - Date.now())}` : null,
-			};
-		case "meeting": {
-			try {
-				const m = JSON.parse(status.pauseDetail ?? "") as { title: string; end: number };
-				return { title: m.title || "In a meeting", detail: `Until ${clock(m.end)}` };
-			} catch {
-				return { title: "In a meeting", detail: null };
-			}
-		}
 		default:
 			return null;
 	}

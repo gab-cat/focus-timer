@@ -6,14 +6,13 @@
     "icons": "bun run scripts/build-icons.ts",
     "postinstall": "bun run scripts/ensure-electrobun-cli.ts",
     "ensure-cli": "bun run scripts/ensure-electrobun-cli.ts",
-    "native": "bun run scripts/build-ai-helper.ts",
-    "start": "bun run ensure-cli && vite build && bun run native && electrobun dev",
-    "dev": "bun run ensure-cli && vite build && bun run native && electrobun dev --watch",
+    "start": "bun run ensure-cli && vite build && electrobun dev",
+    "dev": "bun run ensure-cli && vite build && electrobun dev --watch",
     "dev:hmr": "concurrently \"bun run hmr\" \"bun run start\"",
     "hmr": "vite --port 5173",
     "prebuild:canary": "bun run icons",
-    "build:canary": "bun run ensure-cli && vite build && bun run native && electrobun build --env=canary",
-    "build": "bun run ensure-cli && vite build && bun run native && electrobun build --env=stable"
+    "build:canary": "bun run ensure-cli && vite build && electrobun build --env=canary",
+    "build": "bun run ensure-cli && vite build && electrobun build --env=stable"
   },
   "dependencies": {
     "@fontsource-variable/geist": "^5.3.0",

@@ -520,20 +520,18 @@ body::after {
 /* ── Components ─────────────────────────────────────────────────────────── */
 
 @layer components {
-	/* Raised surface with a 1px top highlight, like light catching an edge. */
+	/* Flat surface with a 1px top highlight, like light catching an edge. */
 	.panel {
 		@apply rounded-[18px] bg-surface;
 		box-shadow:
 			inset 0 1px 0 rgb(255 255 255 / 0.04),
-			0 0 0 1px rgb(var(--line) / 0.9),
-			0 12px 32px -18px rgb(var(--shadow) / 0.35);
+			0 0 0 1px rgb(var(--line) / 0.9);
 	}
 
 	:root:not(.dark) .panel {
 		box-shadow:
 			inset 0 1px 0 rgb(255 255 255 / 0.9),
-			0 0 0 1px rgb(var(--line) / 1),
-			0 10px 30px -20px rgb(var(--shadow) / 0.25);
+			0 0 0 1px rgb(var(--line) / 1);
 	}
 
 	.kbd {
