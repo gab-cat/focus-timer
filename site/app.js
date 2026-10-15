@@ -2035,10 +2035,15 @@
 			const word = "Focus Timer";
 			const lines = word.split("\n");
 			let size = rows * (lines.length > 1 ? 0.46 : 0.86);
-			o.font = `700 ${size}px Geist, ui-sans-serif, system-ui, sans-serif`;
+			const css = getComputedStyle(document.documentElement);
+			// Drawn in the text face: its open shapes survive a coarse pixel grid
+			// better than the display face does.
+			const family = css.getPropertyValue("--sans").trim() || "sans-serif";
+			const weight = "700";
+			o.font = `${weight} ${size}px ${family}`;
 			const widest = Math.max(...lines.map((l) => o.measureText(l).width));
 			if (widest > cols * 0.98) size *= (cols * 0.98) / widest;
-			o.font = `700 ${size}px Geist, ui-sans-serif, system-ui, sans-serif`;
+			o.font = `${weight} ${size}px ${family}`;
 			o.textAlign = "center";
 			o.textBaseline = "middle";
 			o.fillStyle = "#fff";

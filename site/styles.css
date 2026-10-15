@@ -16,6 +16,44 @@
 	font-display: swap;
 }
 
+/* The page's own voice: Clash Display for headlines, Satoshi for text, and
+   Departure Mono (a pixel mono, like the Pixel Heat icon) for numbers and
+   labels. Geist stays on the app window replica, as in the real app. */
+@font-face {
+	font-family: "Clash Display";
+	src: url("assets/fonts/clash-display-600.woff2") format("woff2");
+	font-weight: 600;
+	font-display: swap;
+}
+
+@font-face {
+	font-family: "Satoshi";
+	src: url("assets/fonts/satoshi-400.woff2") format("woff2");
+	font-weight: 400;
+	font-display: swap;
+}
+
+@font-face {
+	font-family: "Satoshi";
+	src: url("assets/fonts/satoshi-500.woff2") format("woff2");
+	font-weight: 500;
+	font-display: swap;
+}
+
+@font-face {
+	font-family: "Satoshi";
+	src: url("assets/fonts/satoshi-700.woff2") format("woff2");
+	font-weight: 600 900;
+	font-display: swap;
+}
+
+@font-face {
+	font-family: "Departure Mono";
+	src: url("assets/fonts/departure-mono.woff2") format("woff2");
+	font-weight: 400;
+	font-display: swap;
+}
+
 /* ── Tokens ─────────────────────────────────────────────────────────────── */
 
 :root {
@@ -36,8 +74,8 @@
 	--hi: 255 255 255 / 0.9;
 	color-scheme: light;
 
-	--sans: "Geist", ui-sans-serif, system-ui, -apple-system, sans-serif;
-	--mono: "Geist Mono", ui-monospace, "SF Mono", Menlo, monospace;
+	--sans: "Satoshi", ui-sans-serif, system-ui, -apple-system, sans-serif;
+	--mono: "Departure Mono", ui-monospace, "SF Mono", Menlo, monospace;
 	--spring: cubic-bezier(0.34, 1.56, 0.64, 1);
 	--spring-soft: cubic-bezier(0.34, 1.36, 0.64, 1);
 	--out: cubic-bezier(0.22, 1, 0.36, 1);
@@ -108,6 +146,7 @@ html {
 
 body {
 	margin: 0;
+	font-synthesis: none;
 	min-height: 100dvh;
 	background: rgb(var(--bg));
 	color: rgb(var(--ink));
@@ -590,14 +629,16 @@ svg {
 	}
 }
 
-/* ── Hero: the buddy in 3D ──────────────────────────────────────────────── */
+/* ── Hero: the buddy on the horizon ─────────────────────────────────────── */
+/* Type on top, the bot standing on a grid floor that runs to a glowing
+   horizon below it. */
 
 .hero {
 	position: relative;
 	display: flex;
-	align-items: center;
-	min-height: max(100svh, 640px);
-	padding: 104px 0 72px;
+	align-items: flex-start;
+	min-height: max(100svh, 700px);
+	padding: 112px 0 64px;
 	overflow: hidden;
 	isolation: isolate;
 }
@@ -608,8 +649,8 @@ svg {
 	z-index: -2;
 	opacity: 0;
 	transition: opacity 1400ms var(--out);
-	-webkit-mask-image: linear-gradient(to bottom, #000 78%, transparent);
-	mask-image: linear-gradient(to bottom, #000 78%, transparent);
+	-webkit-mask-image: linear-gradient(to bottom, #000 84%, transparent);
+	mask-image: linear-gradient(to bottom, #000 84%, transparent);
 }
 
 .hero-canvas.ready {
@@ -630,7 +671,7 @@ svg {
 	inset: 0;
 	z-index: -1;
 	pointer-events: none;
-	background: linear-gradient(90deg, rgb(var(--bg) / 0.92) 0%, rgb(var(--bg) / 0.55) 34%, transparent 56%);
+	background: linear-gradient(to bottom, rgb(var(--bg) / 0.9) 0%, rgb(var(--bg) / 0.55) 22%, transparent 40%);
 }
 
 .hero-fallback {
@@ -640,11 +681,11 @@ svg {
 .no-3d .hero-fallback {
 	display: block;
 	position: absolute;
-	right: 8%;
-	top: 50%;
-	width: min(360px, 32vw);
+	left: 50%;
+	bottom: 8%;
+	width: min(320px, 50vw);
 	height: auto;
-	transform: translateY(-50%);
+	transform: translateX(-50%);
 	filter: drop-shadow(0 30px 60px rgb(var(--accent) / 0.25));
 	z-index: -1;
 }
@@ -656,15 +697,14 @@ svg {
 
 .hero-copy {
 	pointer-events: auto;
-	max-width: 600px;
+	text-align: center;
 }
 
 .hero h1 {
 	margin: 0;
-	font-size: clamp(50px, 7vw, 100px);
-	line-height: 0.96;
-	letter-spacing: -0.055em;
-	font-weight: 600;
+	font-size: clamp(48px, 6.2vw, 96px);
+	line-height: 1;
+	white-space: nowrap;
 	text-wrap: balance;
 }
 
@@ -673,9 +713,9 @@ svg {
 }
 
 .hero-sub {
-	margin: 26px 0 0;
-	max-width: 31ch;
-	font-size: clamp(17px, 1.5vw, 20px);
+	margin: 18px auto 0;
+	max-width: 44ch;
+	font-size: clamp(16.5px, 1.4vw, 19px);
 	line-height: 1.5;
 	color: rgb(var(--ink-2));
 	text-wrap: pretty;
@@ -686,6 +726,25 @@ svg {
 	flex-wrap: wrap;
 	gap: 10px;
 	margin-top: 36px;
+}
+
+.hero .hero-ctas {
+	justify-content: center;
+	margin-top: 26px;
+}
+
+@media (max-width: 1000px) {
+	.hero {
+		padding-top: 104px;
+	}
+	.hero h1 {
+		white-space: normal;
+		font-size: clamp(42px, 10.5vw, 72px);
+		line-height: 1.02;
+	}
+	.hero-scrim {
+		background: linear-gradient(to bottom, rgb(var(--bg) / 0.94) 0%, rgb(var(--bg) / 0.75) 34%, transparent 52%);
+	}
 }
 
 /* HUD callouts, pinned to points on the 3D dial and the antenna. */
@@ -760,7 +819,7 @@ svg {
 .hud-v {
 	margin-top: 6px;
 	font-family: var(--mono);
-	font-size: 30px;
+	font-size: 33px;
 	font-weight: 300;
 	letter-spacing: -0.04em;
 	line-height: 1.1;
@@ -784,29 +843,6 @@ svg {
 
 .hud-say-text {
 	display: inline-block;
-}
-
-@media (max-width: 1000px) {
-	.hero {
-		align-items: flex-end;
-		padding-bottom: 56px;
-	}
-	.hero-scrim {
-		background: linear-gradient(to top, rgb(var(--bg)) 0%, rgb(var(--bg) / 0.9) 30%, transparent 55%);
-	}
-	.hero-canvas {
-		-webkit-mask-image: none;
-		mask-image: none;
-	}
-	.hero-copy {
-		padding-top: 44vh;
-	}
-	.no-3d .hero-fallback {
-		right: 50%;
-		top: 120px;
-		width: 200px;
-		transform: translateX(50%);
-	}
 }
 
 /* ── Live demo section ──────────────────────────────────────────────────── */
@@ -3821,4 +3857,54 @@ code,
 
 :root[data-theme="dark"] .tray-img {
 	filter: invert(1);
+}
+
+/* ── Display type ───────────────────────────────────────────────────────── */
+/* Headlines get their own family; body and mono stay separate roles. The
+   window replica keeps Geist, because that's the real app's typeface. */
+
+:root {
+	--display: "Clash Display", "Satoshi", ui-sans-serif, system-ui, sans-serif;
+	--display-weight: 600;
+}
+
+/* Clash is already tight and wide, so it wants less negative tracking
+   than the Geist-tuned values above. */
+.hero h1 {
+	letter-spacing: -0.02em;
+}
+
+.h2,
+.foot-quote {
+	letter-spacing: -0.015em;
+}
+
+.mood-caption b,
+.tile h3,
+.fact h3,
+.step h3,
+.key-desc b,
+.brand-name {
+	letter-spacing: 0;
+}
+
+.hero h1,
+.h2,
+.foot-quote,
+.mood-caption b,
+.tile h3,
+.fact h3,
+.step h3,
+.key-desc b,
+.brand-name {
+	font-family: var(--display);
+	font-weight: var(--display-weight);
+}
+
+.mac,
+.brand-face,
+.toast {
+	--sans: "Geist", ui-sans-serif, system-ui, -apple-system, sans-serif;
+	--mono: "Geist Mono", ui-monospace, "SF Mono", Menlo, monospace;
+	font-family: var(--sans);
 }

@@ -15,6 +15,10 @@ import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
 import { RoundedBoxGeometry } from "three/addons/geometries/RoundedBoxGeometry.js";
 
 const FT = window.FT;
+
+// Hero framing: horizontal position (fraction of the canvas), camera height
+// and aim. Vertical placement and scale come from the layout (see resize).
+const HERO = { x: 0.5, camY: 0.35, lookY: 0.3, narrowAt: 1000 };
 const REDUCE = matchMedia("(prefers-reduced-motion: reduce)").matches;
 const COARSE = matchMedia("(pointer: coarse)").matches;
 const TAU = Math.PI * 2;
@@ -278,6 +282,7 @@ class BuddyScene {
 		this.buildBot();
 		if (opts.halo) this.buildHalo();
 		if (opts.platform !== false) this.buildPlatform();
+		if (opts.floor) this.buildFloor();
 		this.buildParticles(opts.particles ?? 260);
 		this.buildSparks();
 		this.buildZzz();
@@ -321,6 +326,7 @@ class BuddyScene {
 
 		new ResizeObserver(() => this.resize()).observe(host);
 		this.resize();
+		if (this.mode === "hero") document.fonts?.ready.then(() => this.resize());
 		new IntersectionObserver(([e]) => (this.visible = e.isIntersecting), { threshold: 0.01 }).observe(host);
 
 		host.addEventListener("click", (e) => this.onClick(e));
@@ -643,6 +649,31 @@ class BuddyScene {
 		plat.add(this.shadow);
 	}
 
+	// A grid floor running off to a glowing horizon.
+	buildFloor() {
+		const g = new THREE.Group();
+		g.position.y = -2.64;
+		this.world.add(g);
+		// Explicit lines (rows across, rails running to the horizon), kept in
+		// front of the camera so nothing gets clipped away.
+		const pts = [];
+		for (let z = -56; z <= 14; z++) pts.push(new THREE.Vector3(-60, 0, z), new THREE.Vector3(60, 0, z));
+		for (let x = -40; x <= 40; x++) pts.push(new THREE.Vector3(x, 0, -56), new THREE.Vector3(x, 0, 14));
+		const grid = new THREE.LineSegments(
+			new THREE.BufferGeometry().setFromPoints(pts),
+			new THREE.LineBasicMaterial({ color: 0xffffff, transparent: true, depthWrite: false }),
+		);
+		this.floorGrid = grid;
+		g.add(grid);
+		this.horizon = new THREE.Mesh(
+			new THREE.PlaneGeometry(90, 18),
+			new THREE.MeshBasicMaterial({ map: TEX.glow, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending }),
+		);
+		this.horizon.position.set(0, 2, -40);
+		g.add(this.horizon);
+		this.scene.fog = new THREE.Fog(0x000000, 18, 58);
+	}
+
 	buildParticles(n) {
 		if (COARSE) n = Math.round(n * 0.5);
 		const pos = new Float32Array(n * 3);
@@ -735,6 +766,16 @@ class BuddyScene {
 			for (const g of this.gyros) g.ringMat.color.copy(P.accent);
 		}
 		this.rim.intensity = dark ? 8 : 6;
+		if (this.floorGrid) {
+			this.floorGrid.material.color.copy(P.accent);
+			this.floorGrid.material.opacity = dark ? 0.4 : 0.45;
+			this.horizon.material.color.copy(P.accent);
+			this.horizon.material.opacity = dark ? 0.35 : 0.2;
+			this.horizon.material.blending = add;
+			this.horizon.material.needsUpdate = true;
+			this.scene.fog.color.copy(pageClear(P.bg));
+		}
+
 	}
 
 	// ── Layout ───────────────────────────────────────────────────────────────
@@ -751,11 +792,22 @@ class BuddyScene {
 		const tan = Math.tan((this.camera.fov * Math.PI) / 360);
 		const aspect = w / h;
 		if (this.mode === "hero") {
-			const narrow = w <= 1000;
-			this.narrow = narrow;
-			this.camDist = narrow ? Math.max(7.6 / (2 * tan), 7.6 / (2 * tan * aspect)) : 8.1 / (2 * tan);
-			// Shift the picture instead of the bot, so it stays front-on.
-			this.camera.setViewOffset(w, h, narrow ? 0 : -(0.69 - 0.5) * w, narrow ? 0.16 * h : 0, w, h);
+			this.narrow = w <= HERO.narrowAt;
+			// Fit the dial and platform into the band between the bottom of the
+			// copy and the bottom of the hero, so the bot never sits under the
+			// buttons on short windows and doesn't balloon on tall ones.
+			const hostTop = this.host.getBoundingClientRect().top;
+			const copy = document.querySelector(".hero-copy");
+			const copyBottom = copy ? copy.getBoundingClientRect().bottom - hostTop : h * 0.4;
+			const top = copyBottom + 20;
+			const band = Math.max(h - 28 - top, h * 0.32);
+			// Halo top to platform is about 5.7 units; the dial must also fit the width.
+			const ppu = Math.min(band / 5.7, (w * 0.92) / 5.8, h / 6.2);
+			const centerY = top + 2.85 * ppu;
+			this.camDist = h / ppu / (2 * tan);
+			// Shift the picture instead of the bot, so it stays front-on. The
+			// camera looks at y = lookY, which sits that far above the dial centre.
+			this.camera.setViewOffset(w, h, -(HERO.x - 0.5) * w, h / 2 + (HERO.lookY - 0.05) * ppu - centerY, w, h);
 		} else if (this.mode === "stage") {
 			this.camDist = Math.max(7.3 / (2 * tan), 7.3 / (2 * tan * aspect));
 			this.camera.clearViewOffset();
@@ -764,6 +816,11 @@ class BuddyScene {
 			this.camera.clearViewOffset();
 		}
 		this.camera.updateProjectionMatrix();
+		// Fog starts just behind the bot, wherever the camera ends up.
+		if (this.scene.fog) {
+			this.scene.fog.near = this.camDist + 4;
+			this.scene.fog.far = this.camDist + 44;
+		}
 	}
 
 	onClick(e) {
@@ -886,8 +943,11 @@ class BuddyScene {
 		} else {
 			this.world.rotation.y = damp(this.world.rotation.y, this.pointerYaw() * 0.12 * M, 3, dt);
 		}
-		cam.position.set(0, 0.55 + lift * 0.4, dist);
-		cam.lookAt(0, 0.05 + lift * 0.4, 0);
+		const camY = this.mode === "hero" ? HERO.camY : 0.55;
+		const lookY = this.mode === "hero" ? HERO.lookY : 0.05;
+		cam.position.set(0, camY + lift * 0.4, dist);
+		cam.lookAt(0, lookY + lift * 0.4, 0);
+		if (this.floorGrid) this.floorGrid.position.z = ((now * 0.8) % 1) * M;
 		this.world.position.y = lift * 0.3;
 
 		this.composer.render(dt);
@@ -1259,17 +1319,21 @@ class BuddyScene {
 		let y1 = a1.y + 18;
 		t1.style.transform = `translate(${x1}px, ${y1}px)`;
 
-		// What it's doing, pinned to the antenna.
-		const a2 = project(this.headG, new THREE.Vector3(0, 1.36, 0));
+		// What it's doing, pinned to the dial at about 8 o'clock, on the left.
+		const th2 = (242 / 360) * TAU;
+		const a2 = project(this.halo, new THREE.Vector3(Math.sin(th2) * RING_R, Math.cos(th2) * RING_R, 0));
 		const t2 = H.say;
 		const w2 = t2.offsetWidth;
-		let x2 = Math.min(a2.x + 70, this.w - w2 - 28);
-		let y2 = a2.y - 62;
+		const h2 = t2.offsetHeight;
+		let x2 = Math.max(a2.x - 56 - w2, 28);
+		let y2 = a2.y + 18;
 		t2.style.transform = `translate(${x2}px, ${y2}px)`;
 
-		const path = (a, x, y, h) => `M${a.x.toFixed(1)} ${a.y.toFixed(1)} L${(x - 18).toFixed(1)} ${(y + h / 2).toFixed(1)} L${x.toFixed(1)} ${(y + h / 2).toFixed(1)}`;
-		H.line1.setAttribute("d", path(a1, x1, y1, h1));
-		H.line2.setAttribute("d", path(a2, x2, y2, t2.offsetHeight));
+		// Elbow leader lines: anchor, a short diagonal, then into the tag.
+		const right = (a, x, y, h) => `M${a.x.toFixed(1)} ${a.y.toFixed(1)} L${(x - 18).toFixed(1)} ${(y + h / 2).toFixed(1)} L${x.toFixed(1)} ${(y + h / 2).toFixed(1)}`;
+		const left = (a, x, y, w, h) => `M${a.x.toFixed(1)} ${a.y.toFixed(1)} L${(x + w + 18).toFixed(1)} ${(y + h / 2).toFixed(1)} L${(x + w).toFixed(1)} ${(y + h / 2).toFixed(1)}`;
+		H.line1.setAttribute("d", right(a1, x1, y1, h1));
+		H.line2.setAttribute("d", left(a2, x2, y2, w2, h2));
 		H.dot1.setAttribute("cx", a1.x.toFixed(1));
 		H.dot1.setAttribute("cy", a1.y.toFixed(1));
 		H.dot2.setAttribute("cx", a2.x.toFixed(1));
@@ -1344,6 +1408,7 @@ function boot() {
 				mode: "hero",
 				halo: true,
 				intro: true,
+				floor: true,
 				particles: 320,
 				hud: hud && {
 					root: hud,
