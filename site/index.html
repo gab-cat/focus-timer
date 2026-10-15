@@ -1,0 +1,518 @@
+<!doctype html>
+<html lang="en">
+<head>
+	<meta charset="utf-8" />
+	<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+	<title>Focus Timer · Your Mac, wide awake</title>
+	<meta name="description" content="Focus Timer is a small macOS app that keeps your Mac awake during long builds, downloads and talks, and only moves once you've stepped away." />
+	<meta name="theme-color" content="#0c0c0d" media="(prefers-color-scheme: dark)" />
+	<meta name="theme-color" content="#f3f3f0" media="(prefers-color-scheme: light)" />
+	<link rel="canonical" href="https://gab-cat.github.io/focus-timer/" />
+
+	<meta property="og:type" content="website" />
+	<meta property="og:title" content="Focus Timer · Your Mac, wide awake" />
+	<meta property="og:description" content="A small macOS app that keeps your Mac awake and only moves once you've stepped away." />
+	<meta property="og:url" content="https://gab-cat.github.io/focus-timer/" />
+	<meta property="og:image" content="https://gab-cat.github.io/focus-timer/assets/og.jpg" />
+	<meta property="og:image:width" content="1200" />
+	<meta property="og:image:height" content="630" />
+	<meta name="twitter:card" content="summary_large_image" />
+	<meta name="twitter:title" content="Focus Timer · Your Mac, wide awake" />
+	<meta name="twitter:description" content="A small macOS app that keeps your Mac awake and only moves once you've stepped away." />
+	<meta name="twitter:image" content="https://gab-cat.github.io/focus-timer/assets/og.jpg" />
+
+	<link rel="icon" type="image/png" href="assets/favicon-64.png" />
+	<link rel="apple-touch-icon" href="assets/apple-touch-icon.png" />
+	<link rel="preload" href="assets/fonts/geist.woff2" as="font" type="font/woff2" crossorigin />
+	<link rel="preload" href="assets/fonts/geist-mono.woff2" as="font" type="font/woff2" crossorigin />
+
+	<script>
+		// Apply the saved appearance before first paint so the page never flashes.
+		try {
+			var t = localStorage.getItem("ft-theme");
+			if (t === "light" || t === "dark") document.documentElement.setAttribute("data-theme", t);
+		} catch (e) {}
+	</script>
+	<link rel="stylesheet" href="styles.css" />
+	<script type="importmap">
+		{
+			"imports": {
+				"three": "https://cdn.jsdelivr.net/npm/three@0.169.0/build/three.module.min.js",
+				"three/addons/": "https://cdn.jsdelivr.net/npm/three@0.169.0/examples/jsm/"
+			}
+		}
+	</script>
+	<link rel="modulepreload" href="https://cdn.jsdelivr.net/npm/three@0.169.0/build/three.module.min.js" crossorigin />
+
+	<script type="application/ld+json">
+		{
+			"@context": "https://schema.org",
+			"@type": "SoftwareApplication",
+			"name": "Focus Timer",
+			"operatingSystem": "macOS",
+			"applicationCategory": "UtilitiesApplication",
+			"description": "Keeps your Mac awake during deep work, long builds and presentations.",
+			"downloadUrl": "https://github.com/gab-cat/focus-timer/releases/latest/download/stable-macos-arm64-FocusTimer.dmg",
+			"offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" }
+		}
+	</script>
+</head>
+<body>
+	<header class="nav" id="nav">
+		<div class="nav-pill">
+			<a class="brand" href="#top" aria-label="Focus Timer, back to top">
+				<span class="brand-face" id="brand-face" aria-hidden="true"></span>
+				<span class="brand-name">Focus Timer</span>
+			</a>
+			<nav class="nav-links" id="nav-links" aria-label="Sections">
+				<span class="nav-thumb" aria-hidden="true"></span>
+				<a href="#demo">Live demo</a>
+				<a href="#buddy">The buddy</a>
+				<a href="#how">How it works</a>
+				<a href="#install">Install</a>
+				<a href="#faq">FAQ</a>
+			</nav>
+			<div class="nav-end">
+				<button class="nav-status press" id="nav-status" type="button" aria-label="Start or end the demo session">
+					<span class="ns-dot" aria-hidden="true"></span>
+					<span class="ns-text" id="ns-text">Asleep</span>
+					<span class="ns-time" id="ns-time"></span>
+				</button>
+				<a class="icon-btn" href="https://github.com/gab-cat/focus-timer" aria-label="Focus Timer on GitHub" data-icon="github"></a>
+				<a class="btn btn-primary btn-sm press" href="https://github.com/gab-cat/focus-timer/releases/latest/download/stable-macos-arm64-FocusTimer.dmg" data-download>
+					<span data-icon="apple" class="apple"></span>
+					<span>Download<span class="label-long"> for Mac</span></span>
+				</a>
+			</div>
+		</div>
+	</header>
+
+	<main id="top">
+		<!-- Hero: the buddy in 3D, in front of the app's dial. -->
+		<section class="hero" id="hero">
+			<div class="hero-canvas" id="hero-canvas" aria-hidden="true"></div>
+			<div class="hero-scrim" aria-hidden="true"></div>
+			<img class="hero-fallback" src="assets/icon-512.png" width="360" height="360" alt="" />
+			<div class="hud" id="hud" aria-hidden="true">
+				<svg class="hud-lines">
+					<path class="l1" /><path class="l2" />
+					<circle class="d1" r="3.5" /><circle class="d2" r="3.5" />
+				</svg>
+				<div class="hud-tag hud-count"><span class="hud-k">Session</span><span class="hud-v">Off</span></div>
+				<div class="hud-tag hud-say"><span class="hud-say-text"></span></div>
+			</div>
+			<div class="wrap hero-inner">
+				<div class="hero-copy">
+					<h1 class="swap">Your Mac,<br /><span class="accent">wide awake.</span></h1>
+					<p class="hero-sub swap" style="--d: 120ms">
+						A tiny bot that stops your Mac dozing off mid-build or mid-talk. It only moves once you step away.
+					</p>
+					<div class="hero-ctas swap" style="--d: 240ms">
+						<a class="btn btn-primary press" href="https://github.com/gab-cat/focus-timer/releases/latest/download/stable-macos-arm64-FocusTimer.dmg" data-download>
+							<span data-icon="apple" class="apple"></span>
+							Download for Mac
+							<span class="kbd" data-version>v1.4.0</span>
+						</a>
+						<a class="btn btn-ghost press" href="https://github.com/gab-cat/focus-timer">
+							<span data-icon="github"></span>
+							View on GitHub
+						</a>
+					</div>
+				</div>
+			</div>
+		</section>
+
+		<!-- The real window, running live. -->
+		<section class="section demo" id="demo" data-state="idle">
+			<div class="wrap demo-grid">
+				<div class="demo-copy">
+					<h2 class="h2 reveal">The real window, running live.</h2>
+					<p class="lede reveal" style="--i: 1">This is Focus Timer's own interface, rebuilt for the web and sped up 15×. Start a session, switch tabs, pick how it moves.</p>
+					<ul class="demo-tips reveal" style="--i: 2">
+						<li><span class="kbd">Space</span>Start or end a session</li>
+						<li><span class="kbd">R</span>Make it move right now</li>
+						<li><span class="kbd">Settings</span>Pick ⌘-Tab, mouse, scroll or Shift</li>
+					</ul>
+				</div>
+				<div class="hero-stage">
+					<div class="mac-fit" id="mac-fit">
+						<div class="mac" id="mac" role="application" aria-label="Interactive demo of the Focus Timer window">
+							<noscript><img src="assets/icon-512.png" width="440" height="440" alt="Focus Timer app icon" /></noscript>
+						</div>
+					</div>
+				</div>
+			</div>
+		</section>
+
+		<!-- The buddy: one big face, every mood it has. -->
+		<section class="section" id="buddy">
+			<div class="wrap center">
+				<h2 class="h2 reveal">There's someone in the dial.</h2>
+				<p class="lede reveal" style="--i: 1">A pair of glowing eyes acts out everything Focus Timer is doing, so you can read it from across the room.</p>
+
+				<div class="moods reveal" style="--i: 2">
+					<div class="mood-canvas" id="mood-canvas" aria-hidden="true"></div>
+					<div class="mood-dial" id="mood-dial">
+						<svg class="ticks" viewBox="0 0 288 288" aria-hidden="true"></svg>
+						<div class="mood-core" id="mood-core">
+							<div class="buddy-scale" id="mood-buddy"></div>
+						</div>
+					</div>
+					<div class="mood-pills" id="mood-pills" role="tablist" aria-label="Moods"></div>
+					<div class="mood-caption" id="mood-caption" aria-live="polite"></div>
+				</div>
+			</div>
+		</section>
+
+		<!-- Four actions, bento. -->
+		<section class="section" id="moves">
+			<div class="wrap">
+				<h2 class="h2 reveal">Four small ways to stay awake.</h2>
+				<p class="lede reveal" style="--i: 1">Pick one in Settings or from the menu bar. Each is tiny, and none of them types anything.</p>
+
+				<div class="bento">
+					<article class="tile wide reveal" data-live>
+						<div class="tile-vis tile-glow">
+							<div class="switcher" id="switcher" aria-hidden="true">
+								<div class="app sel"><i></i></div>
+								<div class="app"><i></i></div>
+								<div class="app"><i></i></div>
+								<div class="app"><i></i></div>
+								<div class="app"><i></i></div>
+							</div>
+							<div class="keys-hint" aria-hidden="true"><span class="kbd" id="cmd-key">⌘</span><span class="kbd" id="tab-key">Tab</span></div>
+						</div>
+						<h3>⌘-Tab <span class="tag">Default</span></h3>
+						<p>Nudges the cursor, then presses ⌘-Tab one to six times, like you're flicking between apps.</p>
+					</article>
+
+					<article class="tile reveal" style="--i: 1" data-live>
+						<div class="tile-vis tile-grid">
+							<div style="position: relative">
+								<div class="pix-cursor cursor-ghost" data-pix aria-hidden="true"></div>
+								<div class="pix-cursor cursor-move" data-pix aria-hidden="true"></div>
+							</div>
+						</div>
+						<h3>Mouse only</h3>
+						<p>A small cursor nudge. Never changes focus.</p>
+					</article>
+
+					<article class="tile reveal" data-live>
+						<div class="tile-vis tile-glow">
+							<div class="page-lines" aria-hidden="true">
+								<div class="track">
+									<i style="width: 82%"></i><i style="width: 64%"></i><i style="width: 90%"></i><i class="hl" style="width: 48%"></i><i style="width: 76%"></i><i style="width: 58%"></i><i style="width: 86%"></i><i style="width: 40%"></i>
+								</div>
+								<div class="scroll-arrows"><span class="up" data-icon="up"></span><span class="dn" data-icon="down"></span></div>
+							</div>
+						</div>
+						<h3>Scroll</h3>
+						<p>One line up and back down. Net zero.</p>
+					</article>
+
+					<article class="tile wide reveal" style="--i: 1" data-live>
+						<div class="tile-vis tile-grid">
+							<div class="shift-key" aria-hidden="true">
+								<span class="arrow" data-icon="shift"></span>
+								shift
+								<span class="shift-ring"></span>
+							</div>
+						</div>
+						<h3>Shift tap</h3>
+						<p>A single press of a modifier key. Nothing gets typed and focus stays where it is.</p>
+					</article>
+				</div>
+			</div>
+		</section>
+
+		<!-- Idle-first + pause rules, as a day on a timeline. -->
+		<section class="section" id="how">
+			<div class="wrap">
+				<span class="eyebrow reveal">How it decides</span>
+				<h2 class="h2 reveal">It only moves when you don't.</h2>
+				<p class="lede reveal" style="--i: 1">Nothing happens until you've been idle for a couple of minutes. Calls, a locked screen and, if you like, battery power make it stand down.</p>
+
+				<div class="panel timeline-card reveal" style="--i: 2">
+					<div class="tl-controls">
+						<div class="tl-toggles" id="tl-toggles"></div>
+						<div class="tl-count"><b id="tl-count" class="tabular">0</b>moves on this sample day</div>
+					</div>
+					<div class="tl-scroll">
+						<div class="tl" id="timeline"></div>
+					</div>
+					<div class="tl-legend">
+						<span><i style="background: rgb(var(--ink) / 0.22)"></i>You at the keyboard</span>
+						<span><i style="background: rgb(var(--accent))"></i>Focus Timer moves</span>
+						<span><i style="background: rgb(var(--warn) / 0.35)"></i>Paused</span>
+					</div>
+				</div>
+			</div>
+		</section>
+
+		<!-- System sleep guard. -->
+		<section class="section sleep" id="sleep">
+			<div class="wrap">
+				<h2 class="h2 reveal">Sleep, blocked. Even with the lid shut.</h2>
+				<p class="lede reveal" style="--i: 1">With Block system sleep on, a session holds off sleep with <code>pmset</code> until it ends. Then everything goes back to normal.</p>
+
+				<div class="cmd-stack">
+					<div class="cmd reveal">
+						<span class="when"><span class="row-ic" data-icon="play"></span>Session starts</span>
+						<span class="line"><span class="p">$</span>pmset -a disablesleep <span class="v">1</span></span>
+						<span class="state on">Sleep blocked</span>
+					</div>
+					<div class="cmd reveal" style="--i: 1">
+						<span class="when"><span class="row-ic" data-icon="stop"></span>Session ends</span>
+						<span class="line"><span class="p">$</span>pmset -a disablesleep <span class="v" style="color: rgb(var(--ink-2))">0</span></span>
+						<span class="state off">Sleep restored</span>
+					</div>
+				</div>
+
+				<div class="facts">
+					<div class="fact reveal">
+						<span class="row-ic" data-icon="lock"></span>
+						<h3>No password, if you'd rather</h3>
+						<p><b>Skip the password</b> installs a sudoers rule that allows only those two <code>pmset</code> commands. It's checked with <code>visudo</code> before it goes live, and Remove takes it out again.</p>
+					</div>
+					<div class="fact reveal" style="--i: 1">
+						<span class="row-ic" data-icon="spark"></span>
+						<h3>Restored after a crash</h3>
+						<p>If the app quits mid-session, the next launch puts sleep back the way it was.</p>
+					</div>
+					<div class="fact reveal" style="--i: 2">
+						<span class="row-ic" data-icon="moon"></span>
+						<h3>Or keep it light</h3>
+						<p>Switch it off and a session simply keeps the display awake with <code>caffeinate</code>.</p>
+					</div>
+				</div>
+			</div>
+		</section>
+
+		<!-- Insights. -->
+		<section class="section" id="insights">
+			<div class="wrap">
+				<h2 class="h2 reveal">Every move, counted. Nothing leaves your Mac.</h2>
+				<p class="lede reveal" style="--i: 1">Today, the last seven days and all time, a heatmap of when it moved, and the mix of actions it used.</p>
+
+				<div class="insights-grid">
+					<div class="panel stat-stack reveal" id="stat-stack">
+						<div><div class="big" data-count="41">0</div><div class="label">Today</div></div>
+						<div><div class="big" data-count="236">0</div><div class="label">Last 7 days</div></div>
+						<div><div class="big" data-count="1958">0</div><div class="label">All time</div></div>
+					</div>
+					<div class="panel heat-card reveal" style="--i: 1" id="heat-card">
+						<div class="card-head">
+							<h4>When it happens</h4>
+							<span class="sample-note">Sample week</span>
+						</div>
+						<div class="heat" id="heat-big"></div>
+						<div class="heat-foot">
+							<span class="tabular" id="heat-big-info"></span>
+							<span class="legend" id="heat-big-legend"></span>
+						</div>
+						<div class="mix-row">
+							<div class="mix-bar" id="mix-big-bar"></div>
+							<div class="mix-list" id="mix-big-list"></div>
+						</div>
+					</div>
+				</div>
+			</div>
+		</section>
+
+		<!-- Keyboard and menu bar. -->
+		<section class="section" id="keys">
+			<div class="wrap">
+				<h2 class="h2 reveal">Hands on the keyboard. Or nowhere near it.</h2>
+				<p class="lede reveal" style="--i: 1">Every control has a key, and the menu bar icon covers the rest without opening a window.</p>
+
+				<div class="kb-grid">
+					<div class="reveal" style="--i: 2">
+						<div class="keys">
+							<button class="keycap space" data-key="space" aria-label="Space: start or end the demo session">space</button>
+							<div class="key-desc"><b>Start or end a session</b><span>The big button, without reaching for it.</span></div>
+
+							<button class="keycap" data-key="r" aria-label="R: move now">R</button>
+							<div class="key-desc"><b>Move now</b><span>Runs the current action right away.</span></div>
+
+							<span class="keycap static" aria-hidden="true">⌘ 1 2 3</span>
+							<div class="key-desc"><b>Switch tabs</b><span>Focus, Insights and Settings.</span></div>
+						</div>
+						<div class="kb-live" id="kb-live" aria-live="polite">
+							<span class="mini" id="kb-buddy"></span>
+							<span id="kb-text"></span>
+						</div>
+					</div>
+
+					<div class="menubar reveal" style="--i: 3" aria-hidden="true">
+						<div class="mb-strip">
+							<span class="tray"><img src="assets/tray-icon.png" alt="" class="tray-img" /></span>
+						</div>
+						<div class="mb-menu" id="mb-menu">
+							<div class="mb-item dim" id="mb-status">Idle</div>
+							<div class="mb-sep"></div>
+							<div class="mb-item" id="mb-toggle">Resume</div>
+							<div class="mb-item hover">Refresh Now</div>
+							<div class="mb-sep"></div>
+							<div class="mb-item">Action <span class="chev">›</span></div>
+							<div class="mb-sep"></div>
+							<div class="mb-item">Show Window</div>
+							<div class="mb-item">Quit</div>
+						</div>
+						<div class="mb-caption"><b>Lives in the menu bar, too.</b>Pause, move now, or switch actions from the icon.</div>
+					</div>
+				</div>
+			</div>
+		</section>
+
+		<!-- Install. -->
+		<section class="section" id="install">
+			<div class="wrap">
+				<h2 class="h2 reveal">Up and running in a minute.</h2>
+				<p class="lede reveal" style="--i: 1">One download, one drag, two quick permissions. Updates arrive on their own after that.</p>
+
+				<div class="steps">
+					<div class="step reveal">
+						<span class="step-ic" data-icon="download"></span>
+						<h3>Download</h3>
+						<p>Grab the <a class="inline" href="https://github.com/gab-cat/focus-timer/releases/latest/download/stable-macos-arm64-FocusTimer.dmg" data-download>disk image</a> for Apple Silicon Macs<span data-size></span>.</p>
+					</div>
+					<div class="step reveal" style="--i: 1">
+						<span class="step-ic" data-icon="window"></span>
+						<h3>Drag to Applications</h3>
+						<p>Open the disk image and drop Focus Timer into your Applications folder.</p>
+					</div>
+					<div class="step reveal" style="--i: 2">
+						<span class="step-ic" data-icon="lock"></span>
+						<h3>Open it once</h3>
+						<p>It isn't notarized, so macOS asks first. Choose Open Anyway in System Settings, under Privacy &amp; Security.</p>
+					</div>
+					<div class="step reveal" style="--i: 3">
+						<span class="step-ic" data-icon="check"></span>
+						<h3>Allow Accessibility</h3>
+						<p>On your first session, macOS asks so Focus Timer can post its tiny mouse and key events.</p>
+					</div>
+				</div>
+			</div>
+		</section>
+
+		<!-- FAQ. -->
+		<section class="section" id="faq">
+			<div class="wrap faq-grid">
+				<div class="faq-head">
+					<h2 class="h2 reveal">Questions, answered.</h2>
+					<p class="lede reveal" style="--i: 1">Something else on your mind? <a class="inline" href="https://github.com/gab-cat/focus-timer/issues" style="color: rgb(var(--accent)); font-weight: 500">Open an issue on GitHub.</a></p>
+				</div>
+				<div class="faq-list">
+					<details class="qa reveal">
+						<summary>Will it get in my way while I'm working?<span class="plus"></span></summary>
+						<div class="ans">No. Before every move it checks how long you've been idle. If you touched the keyboard or mouse inside the threshold (two minutes by default), it waits again instead of moving.</div>
+					</details>
+					<details class="qa reveal" style="--i: 1">
+						<summary>Why does it ask for my password?<span class="plus"></span></summary>
+						<div class="ans">Blocking system sleep uses <code>pmset</code>, which needs admin rights, so macOS asks when a session starts and ends. Turn on Skip the password in Settings to install a rule that allows just those two commands.</div>
+					</details>
+					<details class="qa reveal" style="--i: 2">
+						<summary>Does it send my data anywhere?<span class="plus"></span></summary>
+						<div class="ans">No. Your counts, heatmap and action mix are stored on your Mac. The only thing it fetches is the update check from GitHub Releases.</div>
+					</details>
+					<details class="qa reveal" style="--i: 3">
+						<summary>Which Macs does it run on?<span class="plus"></span></summary>
+						<div class="ans">The release build is for Apple Silicon Macs. The full source is on GitHub if you'd like to build it yourself with Bun.</div>
+					</details>
+					<details class="qa reveal" style="--i: 4">
+						<summary>Why does macOS warn me when I open it?<span class="plus"></span></summary>
+						<div class="ans">The app is signed ad hoc rather than notarized by Apple, which is common for small open-source tools. You only need to allow it once.</div>
+					</details>
+					<details class="qa reveal" style="--i: 5">
+						<summary>Is it OK to use at work?<span class="plus"></span></summary>
+						<div class="ans">Use it where you're allowed to. It's made for presenting, reading, watching long jobs and holding a focus block together, and it should always be used within your workplace, school and client policies.</div>
+					</details>
+					<details class="qa reveal" style="--i: 6">
+						<summary>Does it cost anything?<span class="plus"></span></summary>
+						<div class="ans">No. It's free, and every line of it is on GitHub.</div>
+					</details>
+				</div>
+			</div>
+		</section>
+
+		<!-- Final call. -->
+		<section class="section final" id="get">
+			<div class="wrap">
+				<div class="final-canvas" id="final-canvas" aria-hidden="true"></div>
+				<div class="final-dial reveal" id="final-dial">
+					<svg viewBox="0 0 288 288" aria-hidden="true"></svg>
+					<div class="core-wrap">
+						<div class="core" style="background: radial-gradient(circle at 50% 30%, rgb(var(--ink) / 0.05), transparent 65%), rgb(var(--surface)); box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.05), 0 0 0 1px rgb(var(--line)), 0 24px 60px -28px rgb(var(--shadow) / 0.4)">
+							<img src="assets/icon-256.png" width="92" height="92" alt="Focus Timer app icon" />
+						</div>
+					</div>
+				</div>
+				<h2 class="h2 reveal" style="--i: 1">Ready when you are.</h2>
+				<p class="lede reveal final-lede" style="--i: 1">It's dozing. Hover the button and watch it perk up.</p>
+				<div class="hero-ctas reveal" style="--i: 2">
+					<a class="btn btn-primary press" href="https://github.com/gab-cat/focus-timer/releases/latest/download/stable-macos-arm64-FocusTimer.dmg" data-download>
+						<span data-icon="apple" class="apple"></span>
+						Download for Mac
+						<span class="kbd" data-version>v1.4.0</span>
+					</a>
+					<a class="btn btn-ghost press" href="https://github.com/gab-cat/focus-timer">
+						<span data-icon="github"></span>
+						View on GitHub
+					</a>
+				</div>
+				<p class="final-meta reveal" style="--i: 3" id="final-meta">Free and open source. For Apple Silicon Macs.</p>
+			</div>
+		</section>
+	</main>
+
+	<footer class="foot" id="foot">
+		<div class="wrap">
+			<div class="foot-top">
+				<div class="foot-sign">
+					<a class="brand" href="#top"><img src="assets/icon-256.png" width="34" height="34" alt="" />Focus Timer</a>
+					<p class="foot-quote">“Holding the fort until you step away.”</p>
+					<p class="foot-visit" id="foot-visit" aria-live="off">You just got here. The buddy hasn't moved yet.</p>
+				</div>
+				<div class="foot-cols">
+					<div>
+						<h4>Get it</h4>
+						<a href="https://github.com/gab-cat/focus-timer/releases/latest/download/stable-macos-arm64-FocusTimer.dmg" data-download>Download for Mac</a>
+						<a href="https://github.com/gab-cat/focus-timer/releases">All releases</a>
+					</div>
+					<div>
+						<h4>Project</h4>
+						<a href="https://github.com/gab-cat/focus-timer">Source on GitHub</a>
+						<a href="https://github.com/gab-cat/focus-timer/issues">Report an issue</a>
+					</div>
+					<div>
+						<h4>Try here</h4>
+						<span class="foot-key"><span class="kbd">Space</span>Wake or sleep</span>
+						<span class="foot-key"><span class="kbd">R</span>Move now</span>
+					</div>
+				</div>
+			</div>
+			<div class="pixel-word" id="pixel-word" role="img" aria-label="Focus Timer"><canvas></canvas></div>
+			<div class="foot-bottom">
+				<span>Made by <a href="https://github.com/gab-cat">gab-cat</a> with Electrobun, Bun and React. This page was kept awake by Focus Timer.</span>
+				<div class="foot-right">
+					<span>Appearance</span>
+					<div class="seg" id="theme-seg" role="radiogroup" aria-label="Appearance">
+						<span class="seg-thumb" aria-hidden="true"></span>
+						<button role="radio" data-theme-opt="auto">Auto</button>
+						<button role="radio" data-theme-opt="light">Light</button>
+						<button role="radio" data-theme-opt="dark">Dark</button>
+					</div>
+				</div>
+			</div>
+		</div>
+	</footer>
+
+	<div class="toast" id="toast" role="status" aria-live="polite">
+		<span class="toast-face" id="toast-face" aria-hidden="true"></span>
+		<span class="toast-text" id="toast-text"></span>
+	</div>
+
+	<script src="app.js" defer></script>
+	<script type="module" src="bot.js"></script>
+</body>
+</html>

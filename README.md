@@ -2,6 +2,8 @@
 
 A compact macOS desktop app for keeping your computer awake during focused work, long-running tasks, calls, and presentations.
 
+**Website:** [gab-cat.github.io/focus-timer](https://gab-cat.github.io/focus-timer/) · **Download:** [latest release](https://github.com/gab-cat/focus-timer/releases/latest/download/stable-macos-arm64-FocusTimer.dmg)
+
 Focus Timer is built with Electrobun, Bun, React, Vite, and Tailwind CSS. It provides a small desktop window with a session timer, activity status, and manual refresh control.
 
 ## Features
