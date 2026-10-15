@@ -300,29 +300,56 @@ export function Rolling({
 						</span>
 					);
 				}
-				const d = spin && !mounted ? 9 : Number(ch);
 				const order = col++;
 				return (
-					<span key={`d${key}`} aria-hidden className="relative inline-block h-[1em] overflow-hidden leading-none">
-						<span className="invisible">0</span>
-						<span
-							className="absolute left-0 top-0 flex flex-col"
-							style={{
-								transform: `translateY(${-d * 10}%)`,
-								transition: settled
-									? "transform 520ms cubic-bezier(0.22, 1, 0.36, 1)"
-									: `transform 1100ms cubic-bezier(0.16, 1, 0.3, 1) ${order * 90}ms`,
-							}}
-						>
-							{Array.from({ length: 10 }, (_, n) => (
-								<span key={n} className="block h-[1em] leading-none">
-									{n}
-								</span>
-							))}
-						</span>
-					</span>
+					<RollDigit
+						key={`d${key}`}
+						d={spin && !mounted ? 9 : Number(ch)}
+						{...(settled
+							? { ms: 520, delay: 0, ease: "cubic-bezier(0.22, 1, 0.36, 1)" }
+							: { ms: 1100, delay: order * 90, ease: "cubic-bezier(0.16, 1, 0.3, 1)" })}
+					/>
 				);
 			})}
+		</span>
+	);
+}
+
+// One odometer column. The window fades out at its top and bottom edges
+// (.roll-window), and the strip picks up a brief motion blur while it travels,
+// scaled by how many digits it passes.
+function RollDigit({ d, ms, delay, ease }: { d: number; ms: number; delay: number; ease: string }) {
+	const strip = useRef<HTMLSpanElement>(null);
+	const last = useRef(d);
+	useEffect(() => {
+		const dist = Math.abs(d - last.current);
+		last.current = d;
+		if (!dist || matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+		const peak = Math.min(0.09, 0.03 + dist * 0.007);
+		strip.current?.animate(
+			[
+				{ filter: "blur(0em)" },
+				{ filter: `blur(${peak}em)`, offset: 0.08 },
+				{ filter: "blur(0em)", offset: 0.55 },
+				{ filter: "blur(0em)" },
+			],
+			{ duration: ms, delay },
+		);
+	}, [d, ms, delay]);
+	return (
+		<span aria-hidden className="roll-window">
+			<span className="invisible">0</span>
+			<span
+				ref={strip}
+				className="absolute left-0 top-0 flex flex-col"
+				style={{ transform: `translateY(${-d * 10}%)`, transition: `transform ${ms}ms ${ease} ${delay}ms` }}
+			>
+				{Array.from({ length: 10 }, (_, n) => (
+					<span key={n} className="roll-cell">
+						{n}
+					</span>
+				))}
+			</span>
 		</span>
 	);
 }

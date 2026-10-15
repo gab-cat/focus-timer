@@ -98,6 +98,43 @@ body::after {
 	display: none;
 }
 
+/* Odometer window (see Rolling): taller than the digit and faded at both
+   ends, so rolling digits melt in and out instead of being sliced by a hard
+   edge. Negative margins keep the layout box at 1em. */
+.roll-window {
+	--roll-pad: 0.3em;
+	--roll-h: calc(1em + 2 * var(--roll-pad));
+	position: relative;
+	display: inline-block;
+	height: var(--roll-h);
+	margin-block: calc(-1 * var(--roll-pad));
+	line-height: var(--roll-h);
+	overflow: hidden;
+	-webkit-mask-image: linear-gradient(
+		to bottom,
+		transparent,
+		rgb(0 0 0 / 0.4) 11%,
+		#000 25%,
+		#000 75%,
+		rgb(0 0 0 / 0.4) 89%,
+		transparent
+	);
+	mask-image: linear-gradient(
+		to bottom,
+		transparent,
+		rgb(0 0 0 / 0.4) 11%,
+		#000 25%,
+		#000 75%,
+		rgb(0 0 0 / 0.4) 89%,
+		transparent
+	);
+}
+
+.roll-cell {
+	display: block;
+	height: var(--roll-h);
+}
+
 /* ── Ambient light ──────────────────────────────────────────────────────── */
 /* A soft glow behind the dial that follows session state. */
 
@@ -314,6 +351,91 @@ body::after {
 	transform-box: fill-box;
 	transform-origin: center;
 	animation: grow-y 700ms cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+
+/* Lap: the wait runs out. A wave of light runs round the bezel, the comet
+   head flares and throws sparks, and the digits squash like jelly and hold
+   in the accent color until the next wait spins in. */
+@keyframes lap-tick {
+	0% {
+		opacity: 0;
+	}
+	25% {
+		opacity: 1;
+	}
+	100% {
+		opacity: 0;
+	}
+}
+
+.lap-tick {
+	animation: lap-tick 620ms cubic-bezier(0.22, 1, 0.36, 1) both;
+	animation-delay: calc(var(--i) * 8ms);
+}
+
+@keyframes lap-flare {
+	from {
+		opacity: 0.9;
+		transform: scale(0.5);
+	}
+	to {
+		opacity: 0;
+		transform: scale(4.2);
+	}
+}
+
+.lap-flare {
+	transform-box: fill-box;
+	transform-origin: center;
+	animation: lap-flare 760ms cubic-bezier(0.22, 1, 0.36, 1) both;
+	animation-delay: var(--d, 0ms);
+}
+
+@keyframes lap-spark {
+	0% {
+		opacity: 0;
+		transform: translate(0, 0) rotate(0deg) scale(0.3);
+	}
+	20% {
+		opacity: 1;
+		transform: translate(calc(var(--dx) * 0.5), calc(var(--dy) * 0.5)) rotate(calc(var(--rot) * 0.4)) scale(1.15);
+	}
+	100% {
+		opacity: 0;
+		transform: translate(var(--dx), var(--dy)) rotate(var(--rot)) scale(0.35);
+	}
+}
+
+.lap-spark {
+	transform-box: fill-box;
+	transform-origin: center;
+	animation: lap-spark 900ms cubic-bezier(0.16, 1, 0.3, 1) both;
+	animation-delay: var(--d, 0ms);
+}
+
+@keyframes lap-pop {
+	0% {
+		transform: none;
+	}
+	22% {
+		transform: scale(1.16, 0.84);
+		color: rgb(var(--accent));
+	}
+	48% {
+		transform: scale(0.93, 1.08);
+	}
+	70% {
+		transform: scale(1.03, 0.98);
+	}
+	100% {
+		transform: none;
+		color: rgb(var(--accent));
+	}
+}
+
+.animate-lap-pop {
+	transform-origin: 50% 70%;
+	animation: lap-pop 780ms cubic-bezier(0.37, 0, 0.63, 1) both;
 }
 
 /* Buddy */

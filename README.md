@@ -16,6 +16,7 @@ Focus Timer is built with Electrobun, Bun, React, Vite, and Tailwind CSS. It pro
 - **Trackpad-style scrolling**: phased two-finger gestures with momentum (or plain wheel clicks)
 - **Pauses for meetings**: reads macOS Calendar and stays quiet during events with other people or a video link
 - **Learns your rhythm**: optionally records how *you* move (stroke distances, timing, pauses; never keys or screen content) and replays it
+- **Plan a session** with Apple Intelligence: describe what you're working on and get a title, a length and a sub-goal checklist; the session auto-stops when the plan ends, and before your next meeting when Calendar access is on. Runs on-device; hidden when Apple Intelligence isn't available
 - **Insights**: a 7×24 heatmap of when it moved (or when you were active), the routine mix, and your learned rhythm
 - Runs periodic refresh cycles at randomized intervals
 - Shows the next cycle countdown, last refresh time, and total cycle count
@@ -34,8 +35,11 @@ Use it only in ways that comply with your workplace, client, school, and softwar
 - macOS
 - Bun
 - Electrobun dependencies installed through this project
+- To build: the macOS 26 SDK (Xcode 26 or matching Command Line Tools), for the Swift helper in `native/ai-helper`
 
 This app uses macOS command-line tools including `caffeinate` and `osascript`.
+
+The session planner uses Apple Intelligence, which needs an Apple Silicon Mac on macOS 26 or later with Apple Intelligence turned on in **System Settings → Apple Intelligence & Siri**. Without it, the rest of the app works the same and the planner stays hidden. Plans are generated on your Mac by Apple's on-device model; nothing is sent to a server.
 
 ## Getting Started
 

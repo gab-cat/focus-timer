@@ -30,6 +30,8 @@ export default {
 			"dist/assets": "views/mainview/assets",
 			"dist/tray-icon.png": "views/mainview/tray-icon.png",
 			"dist/favicon.png": "views/mainview/favicon.png",
+			// Apple Intelligence bridge, built by scripts/build-ai-helper.ts.
+			"native/ai-helper/.build/ai-helper": "native/ai-helper",
 		},
 		// Ignore Vite output in watch mode — HMR handles view rebuilds separately
 		watchIgnore: ["dist/**"],

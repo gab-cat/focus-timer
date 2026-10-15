@@ -19,6 +19,7 @@ import {
 	requestCalendarAccess,
 } from "./calendar";
 import { breakGapMs, breakLengthMs, naturalDelay } from "./humanize";
+import { getIntelligenceInfo, planSession, stopIntelligence } from "./intelligence";
 import {
 	initRhythm,
 	markSyntheticEnd,
@@ -70,6 +71,9 @@ let mainWindow: BrowserWindow | null = null;
 let lastSyntheticAt = 0;
 let nextBreakAt: number | null = null;
 let breakUntil: number | null = null;
+// Auto-stop for the current session when it came from a plan rather than
+// the setting.
+let sessionAutoStopMs: number | null = null;
 
 const status: JigglerStatus = {
 	enabled: false,
@@ -306,18 +310,20 @@ function clearAutoStop() {
 
 function scheduleAutoStop() {
 	clearAutoStop();
-	if (!settings.autoStopMs || settings.autoStopMs <= 0) return;
-	status.autoStopAt = Date.now() + settings.autoStopMs;
+	const ms = sessionAutoStopMs ?? settings.autoStopMs;
+	if (!ms || ms <= 0) return;
+	status.autoStopAt = Date.now() + ms;
 	autoStopTimer = setTimeout(() => {
 		autoStopTimer = null;
 		if (status.enabled) setEnabled(false);
-	}, settings.autoStopMs);
+	}, ms);
 }
 
-function setEnabled(enabled: boolean): JigglerStatus {
+function setEnabled(enabled: boolean, autoStopMs: number | null = null): JigglerStatus {
 	if (enabled === status.enabled) return { ...status };
 	status.enabled = enabled;
 	if (enabled) {
+		sessionAutoStopMs = autoStopMs && autoStopMs > 0 ? autoStopMs : null;
 		status.sessionStartedAt = Date.now();
 		status.actionCount = 0;
 		setPause(null);
@@ -342,6 +348,7 @@ function setEnabled(enabled: boolean): JigglerStatus {
 		endBreak();
 		nextBreakAt = null;
 		clearAutoStop();
+		sessionAutoStopMs = null;
 		stopCaffeinate();
 		void requestSleepGuard(false);
 		pushStatus();
@@ -362,7 +369,8 @@ async function triggerNow(): Promise<JigglerStatus> {
 
 function applySettingsSideEffects(prev: Settings) {
 	if (prev.autoStopMs !== settings.autoStopMs) {
-		if (status.enabled) scheduleAutoStop();
+		// A planned session keeps its own length.
+		if (status.enabled && sessionAutoStopMs == null) scheduleAutoStop();
 	}
 	if (
 		status.enabled &&
@@ -463,7 +471,7 @@ Updater.onStatusChange((entry) => {
 const rpc = BrowserView.defineRPC<JigglerRPC>({
 	handlers: {
 		requests: {
-			setEnabled: ({ enabled }) => setEnabled(enabled),
+			setEnabled: ({ enabled, autoStopMs }) => setEnabled(enabled, autoStopMs ?? null),
 			getStatus: () => ({ ...status }),
 			triggerNow: () => triggerNow(),
 			getAppInfo: () => ({ ...appInfo }),
@@ -492,6 +500,8 @@ const rpc = BrowserView.defineRPC<JigglerRPC>({
 			openCalendarPrivacy: () => openCalendarPrivacy(),
 			getRhythm: () => rhythmInfo(),
 			resetRhythm: () => resetRhythm(),
+			getIntelligenceInfo: () => getIntelligenceInfo(),
+			planSession: ({ text }) => planSession(text),
 		},
 		messages: {},
 	},
@@ -641,6 +651,7 @@ function shutdown() {
 	shuttingDown = true;
 	stopCaffeinate();
 	stopRhythm();
+	stopIntelligence();
 	releaseSleepGuardSync();
 }
 

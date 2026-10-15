@@ -3,3 +3,4 @@ build/
 dist/
 artifacts/
 *.tsbuildinfo
+native/ai-helper/.build/

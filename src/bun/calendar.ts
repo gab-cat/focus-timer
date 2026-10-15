@@ -112,6 +112,13 @@ export async function currentMeeting(): Promise<Meeting | null> {
 	return meetings.find((m) => m.start <= now && now < m.end) ?? null;
 }
 
+export async function nextMeeting(): Promise<Meeting | null> {
+	await refresh();
+	if (access !== "granted") return null;
+	const now = Date.now();
+	return meetings.find((m) => m.start > now) ?? null;
+}
+
 function info(): CalendarInfo {
 	const now = Date.now();
 	const current = meetings.find((m) => m.start <= now && now < m.end) ?? null;

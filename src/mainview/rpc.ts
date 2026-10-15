@@ -2,7 +2,9 @@ import { Electroview } from "electrobun/view";
 import type {
 	AppInfo,
 	CalendarInfo,
+	IntelligenceInfo,
 	JigglerRPC,
+	PlanResult,
 	RhythmInfo,
 	JigglerStatus,
 	Settings,
@@ -74,8 +76,11 @@ const rpc = Electroview.defineRPC<JigglerRPC>({
 
 export const electroview = new Electroview({ rpc });
 
-export async function setEnabled(enabled: boolean): Promise<JigglerStatus> {
-	return electroview.rpc!.request.setEnabled({ enabled });
+export async function setEnabled(
+	enabled: boolean,
+	autoStopMs: number | null = null,
+): Promise<JigglerStatus> {
+	return electroview.rpc!.request.setEnabled({ enabled, autoStopMs });
 }
 
 export async function getStatus(): Promise<JigglerStatus> {
@@ -148,4 +153,12 @@ export async function getRhythm(): Promise<RhythmInfo> {
 
 export async function resetRhythm(): Promise<RhythmInfo> {
 	return electroview.rpc!.request.resetRhythm({});
+}
+
+export async function getIntelligenceInfo(): Promise<IntelligenceInfo> {
+	return electroview.rpc!.request.getIntelligenceInfo({});
+}
+
+export async function planSession(text: string): Promise<PlanResult> {
+	return electroview.rpc!.request.planSession({ text });
 }

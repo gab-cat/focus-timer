@@ -2,15 +2,19 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
 	type AppInfo,
 	DEFAULT_SETTINGS,
+	type IntelligenceInfo,
 	type JigglerStatus,
 	type RhythmInfo,
+	type SessionPlan,
 	type Settings,
 	type Stats,
 } from "../shared/types";
 import { Focus } from "./Focus";
 import { Insights } from "./Insights";
+import { planAutoStopMs } from "./Planner";
 import {
 	getAppInfo,
+	getIntelligenceInfo,
 	getRhythm,
 	getSettings,
 	getStats,
@@ -93,6 +97,11 @@ function App() {
 	const [busy, setBusy] = useState(false);
 	const [moving, setMoving] = useState(false);
 	const [, force] = useState(0);
+	// Session planner. Lives here so it survives tab switches.
+	const [intel, setIntel] = useState<IntelligenceInfo | null>(null);
+	const [draft, setDraft] = useState("");
+	const [plan, setPlan] = useState<SessionPlan | null>(null);
+	const [done, setDone] = useState<boolean[]>([]);
 
 	useTheme(settings.theme);
 
@@ -110,23 +119,52 @@ function App() {
 			onRhythm(setRhythm),
 		];
 		const tick = setInterval(() => force((n) => n + 1), 1000);
+		// Re-check on focus: Apple Intelligence may have been turned on, or
+		// its model finished downloading, while we were in the background.
+		const checkIntel = () => {
+			getIntelligenceInfo().then(setIntel).catch(() => {});
+		};
+		checkIntel();
+		window.addEventListener("focus", checkIntel);
 		return () => {
 			for (const off of offs) off();
 			clearInterval(tick);
+			window.removeEventListener("focus", checkIntel);
 		};
 	}, []);
 
 	const statusRef = useRef(status);
 	statusRef.current = status;
+	const planRef = useRef(plan);
+	planRef.current = plan;
 
 	const toggle = useCallback(async () => {
 		setBusy(true);
 		try {
-			setStatus(await setEnabled(!statusRef.current.enabled));
+			const starting = !statusRef.current.enabled;
+			const planned = starting && planRef.current ? planAutoStopMs(planRef.current) : null;
+			setStatus(await setEnabled(starting, planned));
 		} catch {
 		} finally {
 			setBusy(false);
 		}
+	}, []);
+
+	// A plan covers one session: clear it once that session ends, however
+	// it ends (button, tray, auto-stop).
+	const wasEnabled = useRef(status.enabled);
+	useEffect(() => {
+		if (wasEnabled.current && !status.enabled) {
+			setPlan(null);
+			setDone([]);
+			setDraft("");
+		}
+		wasEnabled.current = status.enabled;
+	}, [status.enabled]);
+
+	const choosePlan = useCallback((next: SessionPlan | null) => {
+		setPlan(next);
+		setDone(next ? next.steps.map(() => false) : []);
 	}, []);
 
 	const moveNow = useCallback(async () => {
@@ -177,6 +215,15 @@ function App() {
 				moving={moving}
 				onToggle={() => void toggle()}
 				onMoveNow={() => void moveNow()}
+				planner={{
+					available: intel?.available ?? false,
+					draft,
+					plan,
+					done,
+					onDraft: setDraft,
+					onPlan: choosePlan,
+					onToggleStep: (i) => setDone((d) => d.map((v, j) => (j === i ? !v : v))),
+				}}
 			/>
 		) : t === "insights" ? (
 			<Insights stats={stats} rhythm={rhythm} settings={settings} />

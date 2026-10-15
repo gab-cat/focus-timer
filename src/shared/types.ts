@@ -122,6 +122,31 @@ export type RhythmInfo = {
 	updatedAt: number | null;
 };
 
+// Why the on-device model can't be used. The first three come straight from
+// FoundationModels; the rest are ours.
+export type IntelligenceReason =
+	| "deviceNotEligible"
+	| "appleIntelligenceNotEnabled"
+	| "modelNotReady"
+	| "unsupportedOS"
+	| "unavailable"
+	| "helperFailed";
+
+export type IntelligenceInfo = {
+	available: boolean;
+	reason: IntelligenceReason | null;
+};
+
+export type SessionPlan = {
+	title: string;
+	minutes: number;
+	steps: string[];
+	// Set when the length was cut short to end before this meeting.
+	endsBefore: { title: string; start: number } | null;
+};
+
+export type PlanResult = { ok: true; plan: SessionPlan } | { ok: false; error: string };
+
 export type UpdatePhase =
 	| "idle"
 	| "checking"
@@ -143,7 +168,11 @@ export type AppInfo = {
 export type JigglerRPC = {
 	bun: RPCSchema<{
 		requests: {
-			setEnabled: { params: { enabled: boolean }; response: JigglerStatus };
+			// autoStopMs overrides the auto-stop setting for this session only.
+			setEnabled: {
+				params: { enabled: boolean; autoStopMs?: number | null };
+				response: JigglerStatus;
+			};
 			getStatus: { params: {}; response: JigglerStatus };
 			triggerNow: { params: {}; response: JigglerStatus };
 			getAppInfo: { params: {}; response: AppInfo };
@@ -162,6 +191,8 @@ export type JigglerRPC = {
 			openCalendarPrivacy: { params: {}; response: void };
 			getRhythm: { params: {}; response: RhythmInfo };
 			resetRhythm: { params: {}; response: RhythmInfo };
+			getIntelligenceInfo: { params: {}; response: IntelligenceInfo };
+			planSession: { params: { text: string }; response: PlanResult };
 		};
 		messages: {};
 	}>;
