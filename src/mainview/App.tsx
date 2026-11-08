@@ -90,20 +90,46 @@ function App() {
 	useTheme(settings.theme);
 
 	useEffect(() => {
-		getStatus().then(setStatus).catch(() => {});
-		getAppInfo().then(setAppInfo).catch(() => {});
-		getSettings().then(setSettings).catch(() => {});
-		getStats().then(setStats).catch(() => {});
+		const sync = () => {
+			getStatus().then(setStatus).catch(() => {});
+			getAppInfo().then(setAppInfo).catch(() => {});
+			getSettings().then(setSettings).catch(() => {});
+			getStats().then(setStats).catch(() => {});
+		};
+		sync();
 		const offs = [
 			onStatus(setStatus),
 			onAppInfo(setAppInfo),
 			onSettings(setSettings),
 			onStats(setStats),
 		];
-		const tick = setInterval(() => force((n) => n + 1), 1000);
+		// The 1s clock only runs while the window is visible. Re-rendering a
+		// hidden window for hours leaves WebKit a backlog to work through when
+		// you bring it back.
+		let tick: ReturnType<typeof setInterval> | null = null;
+		const startTick = () => {
+			if (tick) return;
+			tick = setInterval(() => force((n) => n + 1), 1000);
+		};
+		const stopTick = () => {
+			if (tick) clearInterval(tick);
+			tick = null;
+		};
+		const onVisibility = () => {
+			if (document.hidden) {
+				stopTick();
+			} else {
+				sync();
+				force((n) => n + 1);
+				startTick();
+			}
+		};
+		if (!document.hidden) startTick();
+		document.addEventListener("visibilitychange", onVisibility);
 		return () => {
 			for (const off of offs) off();
-			clearInterval(tick);
+			document.removeEventListener("visibilitychange", onVisibility);
+			stopTick();
 		};
 	}, []);
 

@@ -11,16 +11,10 @@ export type TrayActions = {
 };
 
 let tray: Tray | null = null;
-let lastStatus: JigglerStatus | null = null;
-let lastSettings: Settings | null = null;
+let lastMenuJson = "";
 let actions: TrayActions | null = null;
 
-function mmss(ms: number) {
-	const total = Math.max(0, Math.round(ms / 1000));
-	const m = Math.floor(total / 60);
-	const s = total % 60;
-	return `${m}:${s.toString().padStart(2, "0")}`;
-}
+const clock = new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit" });
 
 function statusLine(status: JigglerStatus): string {
 	if (status.pauseReason) {
@@ -33,8 +27,8 @@ function statusLine(status: JigglerStatus): string {
 	}
 	if (!status.enabled) return "Idle";
 	if (status.nextActionAt) {
-		const remaining = status.nextActionAt - Date.now();
-		return `Active · next in ${mmss(remaining)}`;
+		// An absolute time stays correct without rebuilding the menu every second.
+		return `Active · next move at ${clock.format(status.nextActionAt)}`;
 	}
 	return "Active";
 }
@@ -86,16 +80,13 @@ export function setupTray(imagePath: string, handlers: TrayActions) {
 	return tray;
 }
 
+// Each setMenu rebuilds the whole NSMenu on the main thread, so only do it
+// when the menu's contents actually change.
 export function updateTray(status: JigglerStatus, settings: Settings) {
-	lastStatus = status;
-	lastSettings = settings;
 	if (!tray) return;
-	tray.setMenu(buildMenu(status, settings));
-}
-
-// Refresh just the dynamic countdown label on a 1s tick without rebuilding state.
-export function tickTray() {
-	if (!tray || !lastStatus || !lastSettings) return;
-	if (!lastStatus.enabled || lastStatus.pauseReason) return;
-	tray.setMenu(buildMenu(lastStatus, lastSettings));
+	const menu = buildMenu(status, settings);
+	const json = JSON.stringify(menu);
+	if (json === lastMenuJson) return;
+	lastMenuJson = json;
+	tray.setMenu(menu);
 }

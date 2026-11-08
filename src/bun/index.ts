@@ -35,12 +35,12 @@ import {
 	removeHelper,
 	requestSleepGuard,
 } from "./sleepguard";
-import { setupTray, tickTray, updateTray } from "./tray";
+import { setupTray, updateTray } from "./tray";
 
 const DEV_SERVER_PORT = 5173;
 const DEV_SERVER_URL = `http://localhost:${DEV_SERVER_PORT}`;
 const UPDATE_CHECK_INTERVAL_MS = 60 * 60 * 1000;
-const WINDOW_POLL_MS = 2_000;
+const WINDOW_SAVE_DEBOUNCE_MS = 500;
 
 let caffeinate: Subprocess | null = null;
 let nextTimer: ReturnType<typeof setTimeout> | null = null;
@@ -439,21 +439,26 @@ mainWindow = new BrowserWindow({
 	},
 });
 
-// Poll window position every 2s; persist on change (debounced via the poll cadence itself).
+// Save the window position after it stops moving. Reading the frame blocks on
+// the main thread, so do it once per drag rather than on a timer.
 let lastSavedX = settings.windowX;
 let lastSavedY = settings.windowY;
-setInterval(() => {
-	if (!mainWindow) return;
-	try {
-		const frame = mainWindow.getFrame();
-		if (frame.x !== lastSavedX || frame.y !== lastSavedY) {
+let moveSaveTimer: ReturnType<typeof setTimeout> | null = null;
+mainWindow.on("move", () => {
+	if (moveSaveTimer) clearTimeout(moveSaveTimer);
+	moveSaveTimer = setTimeout(() => {
+		moveSaveTimer = null;
+		if (!mainWindow) return;
+		try {
+			const frame = mainWindow.getFrame();
+			if (frame.x === lastSavedX && frame.y === lastSavedY) return;
 			lastSavedX = frame.x;
 			lastSavedY = frame.y;
 			settings = { ...settings, windowX: frame.x, windowY: frame.y };
 			void saveSettings(settings);
-		}
-	} catch {}
-}, WINDOW_POLL_MS);
+		} catch {}
+	}, WINDOW_SAVE_DEBOUNCE_MS);
+});
 
 // Tray icon — `views://` resolves to the bundled app's Resources/app/views
 // dir in production. In dev (electrobun dev), fall back to the source PNG so
@@ -487,11 +492,6 @@ setupTray(trayIconPath, {
 	},
 });
 updateTray(status, settings);
-
-// Refresh the tray's countdown label every second while active.
-setInterval(() => {
-	tickTray();
-}, 1000);
 
 let shuttingDown = false;
 function shutdown() {

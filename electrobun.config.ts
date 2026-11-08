@@ -15,7 +15,7 @@ export default {
 		baseUrl: "https://github.com/gab-cat/focus-timer/releases/latest/download",
 	},
 	scripts: {
-		// Adds the Apple Events usage description to Info.plist.
+		// Adds the Apple Events usage description and the App Nap opt-out to Info.plist.
 		postBuild: "scripts/post-build-plist.ts",
 		// Runs after the DMG wrapper bundle is built, before the DMG is created.
 		// Ad-hoc signs the wrapper so Gatekeeper shows "unidentified developer"
