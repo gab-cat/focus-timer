@@ -1458,8 +1458,12 @@ function boot() {
 	new MutationObserver(retheme).observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
 	matchMedia("(prefers-color-scheme: dark)").addEventListener("change", retheme);
 
+	// Lenis (set up in app.js) rides this loop, so the page has one rAF driver.
+	const scrollRaf = FT.scroll?.adopt();
+
 	let last = performance.now();
 	const loop = (t) => {
+		scrollRaf?.(t);
 		const dt = Math.min(0.05, (t - last) / 1000);
 		last = t;
 		const now = t / 1000;

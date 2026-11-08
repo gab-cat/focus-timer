@@ -721,8 +721,8 @@
 						</div>
 					</div>
 				</div>
-				<div class="view" data-view="insights" hidden><div class="pad-view scroll-y" id="v-insights"></div></div>
-				<div class="view" data-view="settings" hidden><div class="pad-view scroll-y" id="v-settings"></div></div>
+				<div class="view" data-view="insights" hidden><div class="pad-view scroll-y" id="v-insights" data-lenis-prevent></div></div>
+				<div class="view" data-view="settings" hidden><div class="pad-view scroll-y" id="v-settings" data-lenis-prevent></div></div>
 			</div>`;
 
 		const q = (s) => $(s, mac);
@@ -2157,6 +2157,48 @@
 		for (const el of $$(".reveal")) io.observe(el);
 	}
 
+	// Smooth wheel scrolling with Lenis (loaded just before this file). Touch
+	// stays native, and reduced motion keeps the browser's own scroll. bot.js
+	// takes over the frame from its render loop once the 3D boots; until then,
+	// or if it never does, this file's small loop drives it.
+	function smoothScroll() {
+		if (REDUCE || typeof window.Lenis !== "function") return;
+		const lenis = new Lenis({ lerp: 0.1, smoothWheel: true, syncTouch: false });
+		let raf = requestAnimationFrame(function tick(t) {
+			lenis.raf(t);
+			raf = requestAnimationFrame(tick);
+		});
+		window.FT.scroll = {
+			lenis,
+			adopt() {
+				cancelAnimationFrame(raf);
+				return (t) => lenis.raf(t);
+			},
+		};
+
+		// In-page links glide instead of jumping, and stop clear of the nav by
+		// the same gap as scroll-padding-top in styles.css.
+		const root = document.documentElement;
+		document.addEventListener("click", (e) => {
+			if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+			const a = e.target.closest?.('a[href^="#"]');
+			if (!a) return;
+			const id = a.getAttribute("href").slice(1);
+			const toTop = !id || id === "top";
+			const el = toTop ? $("#top") : document.getElementById(id);
+			if (!el) return;
+			e.preventDefault();
+			const pad = parseFloat(getComputedStyle(root).scrollPaddingTop) || 0;
+			lenis.scrollTo(toTop ? 0 : el, { offset: toTop ? 0 : -pad });
+			if (location.hash !== `#${id}`) history.pushState(null, "", `#${id}`);
+			// Keyboard users land where they were sent, like a native jump.
+			if (e.detail === 0) {
+				if (!el.hasAttribute("tabindex")) el.setAttribute("tabindex", "-1");
+				el.focus({ preventScroll: true });
+			}
+		});
+	}
+
 	function stickyNav() {
 		const nav = $("#nav");
 		const sentinel = document.createElement("div");
@@ -2178,6 +2220,7 @@
 		buildToast();
 		buildFooter();
 		watchDemoViews();
+		smoothScroll();
 		reveals();
 		stickyNav();
 		wireThemeSeg($("#theme-seg"));

@@ -144,6 +144,11 @@ html {
 	background: rgb(var(--bg));
 }
 
+/* Lenis owns the easing while it runs; native smooth scroll would fight it. */
+html.lenis {
+	scroll-behavior: auto;
+}
+
 body {
 	margin: 0;
 	font-synthesis: none;
@@ -203,6 +208,11 @@ svg {
 	outline: 2px solid rgb(var(--accent) / 0.7);
 	outline-offset: 3px;
 	border-radius: 8px;
+}
+
+/* Sections focused by an in-page link (see smoothScroll in app.js). */
+:is(main, main > section)[tabindex="-1"]:focus-visible {
+	outline: none;
 }
 
 .sr-only {
