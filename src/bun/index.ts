@@ -325,12 +325,41 @@ async function runUpdateCycle(): Promise<void> {
 	}
 }
 
+let installError: string | null = null;
+
 Updater.onStatusChange((entry) => {
 	if (entry.status === "download-progress" && entry.details?.progress != null) {
 		appInfo.updateProgress = entry.details.progress;
 		pushAppInfo();
+		return;
+	}
+	if (appInfo.updatePhase !== "installing") return;
+	if (entry.status === "launching-new-version" || entry.status === "complete") {
+		setUpdatePhase("restarting");
+	} else if (entry.status === "error") {
+		installError = entry.details?.errorMessage ?? entry.message;
 	}
 });
+
+// Electrobun's applyUpdate quits the app when it succeeds and returns quietly
+// when it can't, so anything after it is the failure path.
+async function installUpdate(): Promise<void> {
+	if (!appInfo.updateReady) return;
+	if (appInfo.updatePhase === "installing" || appInfo.updatePhase === "restarting") return;
+	installError = null;
+	setUpdatePhase("installing", { error: null });
+	try {
+		// A failed attempt clears Electrobun's ready flag. With the download
+		// still on disk, this just marks it ready again.
+		if (!Updater.updateInfo()?.updateReady) await Updater.downloadUpdate();
+		await Updater.applyUpdate();
+	} catch (err) {
+		installError = (err as Error).message;
+	}
+	setUpdatePhase("ready", {
+		error: installError ?? "The update didn't install.",
+	});
+}
 
 const rpc = BrowserView.defineRPC<JigglerRPC>({
 	handlers: {
@@ -343,9 +372,7 @@ const rpc = BrowserView.defineRPC<JigglerRPC>({
 				await runUpdateCycle();
 				return { ...appInfo };
 			},
-			applyUpdate: async () => {
-				if (appInfo.updateReady) await Updater.applyUpdate();
-			},
+			applyUpdate: () => installUpdate(),
 			getSettings: () => ({ ...settings }),
 			updateSettings: (patch) => updateSettings(patch),
 			getStats: () => ({ ...stats }),

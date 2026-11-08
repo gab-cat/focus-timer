@@ -76,6 +76,10 @@ export type UpdatePhase =
 	| "checking"
 	| "downloading"
 	| "ready"
+	// Restart was pressed: unpacking and swapping in the new version.
+	| "installing"
+	// Swapped in; the app is about to quit and reopen.
+	| "restarting"
 	| "error";
 
 export type AppInfo = {

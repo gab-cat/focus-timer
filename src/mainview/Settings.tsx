@@ -7,7 +7,6 @@ import type {
 } from "../shared/types";
 import { minuteRange, minutesLabel } from "./format";
 import {
-	applyUpdate,
 	checkForUpdate,
 	getSleepHelper,
 	installSleepHelper,
@@ -16,6 +15,7 @@ import {
 	updateSettings,
 } from "./rpc";
 import { LinkButton, Row, Section, Segmented, Toggle } from "./ui";
+import { useUpdateInstall } from "./update";
 
 const patch = (p: Partial<SettingsType>) => void updateSettings(p);
 
@@ -165,6 +165,7 @@ function DataRow() {
 
 function VersionFooter({ info }: { info: AppInfo }) {
 	const [checking, setChecking] = useState(false);
+	const install = useUpdateInstall(info);
 	const channel = info.channel && info.channel !== "stable" ? ` · ${info.channel}` : "";
 	let action: React.ReactNode = (
 		<LinkButton
@@ -187,9 +188,21 @@ function VersionFooter({ info }: { info: AppInfo }) {
 	);
 	if (info.updateReady) {
 		action = (
-			<LinkButton tone="accent" onClick={() => void applyUpdate()}>
-				Restart to update{info.availableVersion ? ` to ${info.availableVersion}` : ""}
-			</LinkButton>
+			<span title={install.state === "failed" ? (info.error ?? undefined) : undefined}>
+				<LinkButton
+					tone={install.state === "failed" ? "danger" : "accent"}
+					disabled={install.state === "installing" || install.state === "restarting"}
+					onClick={install.install}
+				>
+					{install.state === "installing"
+						? "Installing…"
+						: install.state === "restarting"
+							? "Restarting…"
+							: install.state === "failed"
+								? "Install failed · Retry"
+								: `Restart to update${info.availableVersion ? ` to ${info.availableVersion}` : ""}`}
+				</LinkButton>
+			</span>
 		);
 	} else if (info.updatePhase === "error") {
 		action = (

@@ -2,7 +2,8 @@ import { useEffect, useState } from "react";
 import type { AppInfo, JigglerStatus, Settings } from "../shared/types";
 import { Buddy, moodFor } from "./Buddy";
 import { ago, duration, minutesLabel, mmss, pauseCopy, routineLabel } from "./format";
-import { applyUpdate, retrySleepGuard } from "./rpc";
+import { retrySleepGuard } from "./rpc";
+import { useUpdateInstall } from "./update";
 import { Icon, type IconName, Rolling } from "./ui";
 
 type DialState = "idle" | "active" | "paused";
@@ -321,6 +322,38 @@ function Chip({
 	);
 }
 
+function UpdateBanner({ info }: { info: AppInfo }) {
+	const { state, install } = useUpdateInstall(info);
+	const v = info.availableVersion;
+	const busy = state === "installing" || state === "restarting";
+	const failed = state === "failed";
+	const message =
+		state === "installing"
+			? v ? `Installing version ${v}…` : "Installing the update…"
+			: state === "restarting"
+				? "Restarting…"
+				: failed
+					? v ? `Version ${v} didn't install` : "The update didn't install"
+					: v ? `Version ${v} is ready` : "An update is ready";
+	return (
+		<button
+			onClick={install}
+			disabled={busy}
+			aria-busy={busy}
+			title={failed ? (info.error ?? undefined) : undefined}
+			className={`press animate-rise mb-3 flex items-center justify-between rounded-lg px-3.5 py-2 text-[12.5px] transition-colors duration-300 disabled:cursor-default ${
+				failed ? "bg-danger/10 text-danger hover:bg-danger/15" : "bg-accent/10 text-accent hover:bg-accent/15 disabled:hover:bg-accent/10"
+			}`}
+		>
+			<span key={state} className="animate-swap flex items-center gap-2">
+				{busy ? <span className="animate-pulse-dot h-1.5 w-1.5 rounded-full bg-accent" /> : null}
+				{message}
+			</span>
+			{busy ? null : <span className="font-medium">{failed ? "Try again →" : "Restart →"}</span>}
+		</button>
+	);
+}
+
 // What the stand-in says it just did.
 function narrate(routine: string | null): string {
 	switch (routine) {
@@ -399,15 +432,7 @@ export function Focus({
 		<div className="relative flex h-full flex-col overflow-clip px-5 pb-5" data-state={state}>
 			<div className="ambient" />
 
-			{appInfo.updateReady ? (
-				<button
-					onClick={() => void applyUpdate()}
-					className="press animate-rise mb-3 flex items-center justify-between rounded-xl bg-accent/10 px-3.5 py-2 text-[12.5px] text-accent"
-				>
-					<span>Version {appInfo.availableVersion ?? "update"} is ready</span>
-					<span className="font-medium">Restart →</span>
-				</button>
-			) : null}
+			{appInfo.updateReady ? <UpdateBanner info={appInfo} /> : null}
 
 			{/* Status line */}
 			<div className="relative flex items-center justify-between">
