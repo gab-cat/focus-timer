@@ -21,6 +21,7 @@ import {
 	NotifyKind,
 	refreshNotificationPermission,
 	requestNotificationPermission,
+	clearNotification,
 	setNotificationTheme,
 	watchMicrophone,
 } from "./notify";
@@ -253,6 +254,7 @@ function autoStop(at: number) {
 		title: "Session ended",
 		body: `Reached your ${clockLabel(at)} stop time after ${duration(ran)}.`,
 		sound: true,
+		seconds: 12,
 	});
 }
 
@@ -325,13 +327,32 @@ function adoptOngoingCall() {
 }
 
 function onCallStarted() {
-	if (status.enabled && settings.callMode !== "off") status.pauseReason ??= "call";
+	if (status.enabled && settings.callMode !== "off") {
+		status.pauseReason ??= "call";
+		notify({
+			id: "call",
+			kind: NotifyKind.CallPaused,
+			tone: "warn",
+			title: status.callApp ? `On a call in ${status.callApp}` : "On a call",
+			body: "Moves are paused until the call ends.",
+			seconds: 6,
+		});
+	}
 	pushStatus();
 }
 
 function onCallEnded() {
 	if (status.enabled && status.pauseReason === "call") {
 		status.pauseReason = null;
+		// Same id: replaces the "paused" notice if it's still up.
+		notify({
+			id: "call",
+			kind: NotifyKind.CallResumed,
+			tone: "accent",
+			title: "Call ended",
+			body: "Moves are back on.",
+			seconds: 5,
+		});
 		// A fresh wait, so the first move isn't the instant the call ends.
 		scheduleNext();
 		return;
@@ -355,6 +376,7 @@ function askForNotificationsIfNeeded() {
 function setEnabled(enabled: boolean): JigglerStatus {
 	if (enabled === status.enabled) return { ...status };
 	status.enabled = enabled;
+	clearNotification("call");
 	if (enabled) {
 		status.sessionStartedAt = Date.now();
 		status.actionCount = 0;

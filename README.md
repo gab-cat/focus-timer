@@ -72,13 +72,13 @@ If the app quits unexpectedly mid-session, the next launch restores normal sleep
 
 ## Calls
 
-A call is any app using the microphone for 2 seconds, read from CoreAudio (the same signal as the orange microphone dot). It ends after 5 seconds of quiet. Nothing polls: during a session the native helper listens for CoreAudio's own change notices (an input device starting or stopping, an app opening audio), and the app scans only when one arrives, plus one safety check a minute. Before macOS 14.2 it checks once a second instead. Siri, dictation and Voice Control are ignored. While a call lasts, moves pause. The session, its stop time and the sleep block carry on, and moves pick up again when the call ends. Turn it off under **Settings → Pause when → On a call**.
+A call is any app using the microphone for 2 seconds, read from CoreAudio (the same signal as the orange microphone dot). It ends after 5 seconds of quiet. Nothing polls: during a session the native helper listens for CoreAudio's own change notices (an input device starting or stopping, an app opening audio), and the app scans only when one arrives, plus one safety check a minute. Before macOS 14.2 it checks once a second instead. Siri, dictation and Voice Control are ignored. While a call lasts, moves pause. The session, its stop time and the sleep block carry on, and moves pick up again when the call ends. A notice says so when moves pause for a call (yellow) and when they pick up again (green). Turn it off under **Settings → Pause when → On a call**.
 
 ## Notifications
 
-The auto-stop notice comes from a small native library, `native/notify.m`, built by `bun run native` (Xcode Command Line Tools) and bundled at `Resources/app/native/libftnotify.dylib`. Without it, the app falls back to plain notifications.
+The call notices and the auto-stop notice come from a small native library, `native/notify.m`, built by `bun run native` (Xcode Command Line Tools) and bundled at `Resources/app/native/libftnotify.dylib`. Without it, the app falls back to plain notifications.
 
-When macOS won't deliver notifications, the same library shows each notice as a small floating panel in the top-right corner, with the same buttons. That happens when notifications are turned off in System Settings, and always on ad-hoc signed builds: macOS refuses to even ask for permission unless the app is signed with an Apple Developer ID. The panel never takes focus, shows over full-screen apps and follows the app's theme.
+When macOS won't deliver notifications, the same library shows each notice as a small floating panel in the top-right corner, with the same buttons. That happens when notifications are turned off in System Settings, and always on ad-hoc signed builds: macOS refuses to even ask for permission unless the app is signed with an Apple Developer ID. The panel never takes focus, shows over full-screen apps and follows the app's theme. Each one has a Dismiss button and a countdown bar in its status colour (yellow paused, green running), and holds still while the pointer is on it.
 
 ## Permissions
 

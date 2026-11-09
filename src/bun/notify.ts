@@ -13,6 +13,8 @@ import type { NotifyPermission, ThemePref } from "../shared/types";
 
 // What a notification is about. Sent back with every response.
 export const NotifyKind = {
+	CallPaused: 1,
+	CallResumed: 2,
 	AutoStopped: 3,
 	Test: 4,
 } as const;
@@ -36,7 +38,16 @@ type Native = {
 	ft_notify_request: () => void;
 	ft_notify_refresh: () => void;
 	ft_notify_category: (id: Buffer, c1: number, t1: Buffer, c2: number, t2: Buffer) => void;
-	ft_notify_post: (id: Buffer, cat: Buffer, title: Buffer, body: Buffer, kind: number, sound: number) => void;
+	ft_notify_post: (
+		id: Buffer,
+		cat: Buffer,
+		title: Buffer,
+		body: Buffer,
+		kind: number,
+		sound: number,
+		tone: number,
+		seconds: number,
+	) => void;
 	ft_notify_remove: (id: Buffer) => void;
 	ft_notify_theme: (theme: number) => void;
 	ft_mic_watch: (on: number) => number;
@@ -74,7 +85,16 @@ export function initNotifications(handlers: NotifyHandlers): NotifyPermission {
 				returns: FFIType.void,
 			},
 			ft_notify_post: {
-				args: [FFIType.ptr, FFIType.ptr, FFIType.ptr, FFIType.ptr, FFIType.i32, FFIType.i32],
+				args: [
+					FFIType.ptr,
+					FFIType.ptr,
+					FFIType.ptr,
+					FFIType.ptr,
+					FFIType.i32,
+					FFIType.i32,
+					FFIType.i32,
+					FFIType.i32,
+				],
 				returns: FFIType.void,
 			},
 			ft_notify_remove: { args: [FFIType.ptr], returns: FFIType.void },
@@ -131,11 +151,26 @@ export type Notice = {
 	// A category registered with ft_notify_category, for buttons.
 	category?: string;
 	sound?: boolean;
+	// Panel only: the status colour (warn = paused, accent = running) and how
+	// long it stays, shown as a countdown bar. 0 keeps it until removed.
+	tone?: "neutral" | "warn" | "accent";
+	seconds?: number;
 };
+
+const TONES = { neutral: 0, warn: 1, accent: 2 } as const;
 
 export function notify(n: Notice) {
 	if (native) {
-		native.ft_notify_post(c(n.id), c(n.category ?? ""), c(n.title), c(n.body), n.kind, n.sound ? 1 : 0);
+		native.ft_notify_post(
+			c(n.id),
+			c(n.category ?? ""),
+			c(n.title),
+			c(n.body),
+			n.kind,
+			n.sound ? 1 : 0,
+			TONES[n.tone ?? "neutral"],
+			Math.round(n.seconds ?? 8),
+		);
 		return;
 	}
 	try {

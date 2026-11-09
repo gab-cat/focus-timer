@@ -161,14 +161,16 @@ void ft_notify_category(const char *ident, int32_t code1, const char *title1, in
 }
 
 static void showPanel(NSString *ident, NSString *category, NSString *title, NSString *body, int32_t kind,
-                      BOOL sound);
+                      BOOL sound, int32_t tone, int32_t seconds);
 static void hidePanel(NSString *ident);
 
 // Posting with an identifier that's already showing replaces it.
+// tone (panel only): 0 neutral, 1 warn (paused), 2 accent (running).
+// seconds (panel only): how long it stays, with a countdown bar; 0 = until removed.
 void ft_notify_post(const char *ident, const char *category, const char *title, const char *body,
-                    int32_t kind, int32_t sound) {
+                    int32_t kind, int32_t sound, int32_t tone, int32_t seconds) {
 	if (gAuth != 2) {
-		showPanel(str(ident), str(category), str(title), str(body), kind, sound != 0);
+		showPanel(str(ident), str(category), str(title), str(body), kind, sound != 0, tone, seconds);
 		return;
 	}
 	UNMutableNotificationContent *content = [UNMutableNotificationContent new];
@@ -204,7 +206,7 @@ static NSColor *rgb(int r, int g, int b) {
 	return [NSColor colorWithSRGBRed:r / 255.0 green:g / 255.0 blue:b / 255.0 alpha:1];
 }
 
-static NSColor *tone(NSColor *light, NSColor *dark) {
+static NSColor *pair(NSColor *light, NSColor *dark) {
 	return [NSColor colorWithName:nil
 	              dynamicProvider:^NSColor *(NSAppearance *a) {
 		              BOOL isDark = [[a bestMatchFromAppearancesWithNames:@[
@@ -214,13 +216,28 @@ static NSColor *tone(NSColor *light, NSColor *dark) {
 	              }];
 }
 
-static NSColor *ftSurface(void) { return tone(rgb(252, 252, 250), rgb(22, 22, 25)); }
-static NSColor *ftLine(void) { return tone(rgb(222, 222, 216), rgb(44, 44, 50)); }
-static NSColor *ftInk(void) { return tone(rgb(22, 22, 24), rgb(236, 236, 238)); }
-static NSColor *ftSoft(void) { return tone(rgb(236, 236, 232), rgb(36, 36, 41)); }
-static NSColor *ftSoftHover(void) { return tone(rgb(226, 226, 221), rgb(46, 46, 52)); }
-static NSColor *ftAccent(void) { return tone(rgb(20, 158, 101), rgb(112, 230, 170)); }
-static NSColor *ftAccentInk(void) { return tone(rgb(250, 255, 252), rgb(5, 28, 17)); }
+static NSColor *ftSurface(void) { return pair(rgb(252, 252, 250), rgb(22, 22, 25)); }
+static NSColor *ftLine(void) { return pair(rgb(222, 222, 216), rgb(44, 44, 50)); }
+static NSColor *ftInk(void) { return pair(rgb(22, 22, 24), rgb(236, 236, 238)); }
+static NSColor *ftInk3(void) { return pair(rgb(138, 138, 144), rgb(104, 104, 112)); }
+static NSColor *ftSoft(void) { return pair(rgb(236, 236, 232), rgb(36, 36, 41)); }
+static NSColor *ftSoftHover(void) { return pair(rgb(226, 226, 221), rgb(46, 46, 52)); }
+
+enum { FTToneNeutral = 0, FTToneWarn = 1, FTToneAccent = 2 };
+
+// The status colour: --warn while paused, --accent while running.
+static NSColor *toneColor(int32_t tone) {
+	if (tone == FTToneWarn) return pair(rgb(190, 124, 18), rgb(242, 188, 92));
+	if (tone == FTToneAccent) return pair(rgb(20, 158, 101), rgb(112, 230, 170));
+	return ftInk();
+}
+
+// Text on a filled status-colour button.
+static NSColor *toneInk(int32_t tone) {
+	if (tone == FTToneWarn) return pair(rgb(255, 252, 245), rgb(40, 26, 4));
+	if (tone == FTToneAccent) return pair(rgb(250, 255, 252), rgb(5, 28, 17));
+	return ftSurface();
+}
 
 static NSAppearance *panelAppearance(void) {
 	if (gTheme == 1) return [NSAppearance appearanceNamed:NSAppearanceNameDarkAqua];
@@ -236,11 +253,11 @@ static CAMediaTimingFunction *easeOut(void) {
 	return [CAMediaTimingFunction functionWithControlPoints:0.22:1:0.36:1];
 }
 
-typedef NS_ENUM(NSInteger, FTPillStyle) { FTPillPrimary, FTPillSecondary, FTPillClose };
-
 // A button drawn to match the app: hover, press and a pointing cursor.
+// Filled ones take the panel's status colour.
 @interface FTPill : NSView
-@property(nonatomic) FTPillStyle style;
+@property(nonatomic) BOOL filled;
+@property(nonatomic) int32_t tone;
 @property(nonatomic, copy) NSString *title;
 @property(nonatomic, copy) void (^onPress)(void);
 @property(nonatomic) BOOL hover;
@@ -305,34 +322,16 @@ typedef NS_ENUM(NSInteger, FTPillStyle) { FTPillPrimary, FTPillSecondary, FTPill
 
 - (void)drawRect:(NSRect)dirty {
 	NSRect r = self.bounds;
-	NSColor *fill = nil;
-	NSColor *text = ftInk();
-	if (self.style == FTPillPrimary) {
-		fill = [ftAccent() colorWithAlphaComponent:self.down ? 0.78 : self.hover ? 0.88 : 1];
-		text = ftAccentInk();
-	} else if (self.style == FTPillSecondary) {
+	NSColor *fill, *text;
+	if (self.filled) {
+		fill = [toneColor(self.tone) colorWithAlphaComponent:self.down ? 0.78 : self.hover ? 0.88 : 1];
+		text = toneInk(self.tone);
+	} else {
 		fill = self.hover || self.down ? ftSoftHover() : ftSoft();
-	} else if (self.hover || self.down) {
-		fill = ftSoft();
+		text = ftInk();
 	}
-	if (fill) {
-		[fill setFill];
-		CGFloat radius = self.style == FTPillClose ? 5 : 7;
-		[[NSBezierPath bezierPathWithRoundedRect:r xRadius:radius yRadius:radius] fill];
-	}
-	if (self.style == FTPillClose) {
-		NSBezierPath *x = [NSBezierPath bezierPath];
-		CGFloat m = NSMidX(r), n = NSMidY(r), d = 3.5;
-		[x moveToPoint:NSMakePoint(m - d, n - d)];
-		[x lineToPoint:NSMakePoint(m + d, n + d)];
-		[x moveToPoint:NSMakePoint(m + d, n - d)];
-		[x lineToPoint:NSMakePoint(m - d, n + d)];
-		x.lineWidth = 1.4;
-		x.lineCapStyle = NSLineCapStyleRound;
-		[ftInk() setStroke];
-		[x stroke];
-		return;
-	}
+	[fill setFill];
+	[[NSBezierPath bezierPathWithRoundedRect:r xRadius:7 yRadius:7] fill];
 	NSMutableParagraphStyle *para = [NSMutableParagraphStyle new];
 	para.alignment = NSTextAlignmentCenter;
 	NSDictionary *attrs = @{
@@ -353,12 +352,85 @@ typedef NS_ENUM(NSInteger, FTPillStyle) { FTPillPrimary, FTPillSecondary, FTPill
 }
 
 - (NSString *)accessibilityLabel {
-	return self.style == FTPillClose ? @"Close" : self.title;
+	return self.title;
 }
 
 - (BOOL)accessibilityPerformPress {
 	if (self.onPress) self.onPress();
 	return YES;
+}
+
+@end
+
+// A small status dot, like the one next to "Active" in the app.
+@interface FTDot : NSView
+@property(nonatomic) int32_t tone;
+@end
+
+@implementation FTDot
+
+- (void)drawRect:(NSRect)dirty {
+	[(self.tone == FTToneNeutral ? ftInk3() : toneColor(self.tone)) setFill];
+	[[NSBezierPath bezierPathWithOvalInRect:self.bounds] fill];
+}
+
+@end
+
+// Countdown along the bottom edge: drains from full to empty over the
+// panel's lifetime, and freezes while the pointer is on the panel.
+@interface FTBar : NSView
+@property(nonatomic) int32_t tone;
+@property(nonatomic, strong) CALayer *fill;
+@end
+
+@implementation FTBar
+
+- (instancetype)initWithFrame:(NSRect)frame {
+	if ((self = [super initWithFrame:frame])) {
+		self.wantsLayer = YES;
+		self.fill = [CALayer layer];
+		self.fill.anchorPoint = CGPointMake(0, 0.5);
+		self.fill.frame = NSRectToCGRect(self.bounds);
+		[self.layer addSublayer:self.fill];
+	}
+	return self;
+}
+
+- (BOOL)wantsUpdateLayer {
+	return YES;
+}
+
+- (void)updateLayer {
+	[self.effectiveAppearance performAsCurrentDrawingAppearance:^{
+		NSColor *c = self.tone == FTToneNeutral ? ftInk3() : toneColor(self.tone);
+		self.layer.backgroundColor = [c colorWithAlphaComponent:0.16].CGColor;
+		self.fill.backgroundColor = c.CGColor;
+	}];
+}
+
+- (void)runFor:(NSTimeInterval)seconds {
+	CABasicAnimation *a = [CABasicAnimation animationWithKeyPath:@"transform.scale.x"];
+	a.fromValue = @1;
+	a.toValue = @0;
+	a.duration = seconds;
+	a.timingFunction = [CAMediaTimingFunction functionWithName:kCAMediaTimingFunctionLinear];
+	self.fill.transform = CATransform3DMakeScale(0, 1, 1);
+	[self.fill addAnimation:a forKey:@"countdown"];
+}
+
+- (void)setPaused:(BOOL)paused {
+	CALayer *l = self.fill;
+	if (paused && l.speed != 0) {
+		CFTimeInterval t = [l convertTime:CACurrentMediaTime() fromLayer:nil];
+		l.speed = 0;
+		l.timeOffset = t;
+	} else if (!paused && l.speed == 0) {
+		CFTimeInterval frozenAt = l.timeOffset;
+		l.speed = 1;
+		l.timeOffset = 0;
+		l.beginTime = 0;
+		l.beginTime = [l convertTime:CACurrentMediaTime() fromLayer:nil] - frozenAt;
+	}
 }
 
 @end
@@ -424,6 +496,10 @@ typedef NS_ENUM(NSInteger, FTPillStyle) { FTPillPrimary, FTPillSecondary, FTPill
 @property(nonatomic, copy) NSString *ident;
 @property(nonatomic) NSInteger timerGen;
 @property(nonatomic) NSTimeInterval lifetime; // 0 = stays until removed
+@property(nonatomic) CFTimeInterval deadline;
+@property(nonatomic) NSTimeInterval remaining;
+@property(nonatomic) BOOL held;
+@property(nonatomic, strong) FTBar *bar;
 @property(nonatomic) BOOL closing;
 @end
 
@@ -443,6 +519,7 @@ static NSMutableArray<FTPanel *> *gPanels = nil;
 static const CGFloat kPanelWidth = 264;
 static const CGFloat kPanelMargin = 12;
 static const CGFloat kPanelGap = 8;
+static const CGFloat kBarHeight = 3;
 
 static NSScreen *panelScreen(void) {
 	NSPoint mouse = NSEvent.mouseLocation;
@@ -481,6 +558,7 @@ static void layoutPanels(FTPanel *entering) {
 static void closePanel(FTPanel *panel) {
 	if (panel.closing) return;
 	panel.closing = YES;
+	panel.timerGen++;
 	panel.ignoresMouseEvents = YES;
 	BOOL still = reduceMotion();
 	NSRect out = NSOffsetRect(panel.frame, still ? 0 : 16, 0);
@@ -498,9 +576,11 @@ static void closePanel(FTPanel *panel) {
 	layoutPanels(nil);
 }
 
+// Close after `after` seconds unless re-armed or held first.
 static void armTimer(FTPanel *panel, NSTimeInterval after) {
 	if (panel.lifetime <= 0) return;
 	NSInteger gen = ++panel.timerGen;
+	panel.deadline = CACurrentMediaTime() + after;
 	__weak FTPanel *weak = panel;
 	dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(after * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
 		FTPanel *p = weak;
@@ -508,45 +588,65 @@ static void armTimer(FTPanel *panel, NSTimeInterval after) {
 	});
 }
 
+// Pointer on the panel: stop the clock and the bar; off it: carry on from there.
+static void holdPanel(FTPanel *panel, BOOL hold) {
+	if (panel.lifetime <= 0 || panel.closing || hold == panel.held) return;
+	panel.held = hold;
+	if (hold) {
+		panel.remaining = MAX(0, panel.deadline - CACurrentMediaTime());
+		panel.timerGen++;
+		[panel.bar setPaused:YES];
+	} else {
+		[panel.bar setPaused:NO];
+		armTimer(panel, MAX(0.8, panel.remaining));
+	}
+}
+
 static void showPanel(NSString *ident, NSString *category, NSString *title, NSString *body, int32_t kind,
-                      BOOL sound) {
+                      BOOL sound, int32_t tone, int32_t seconds) {
 	dispatch_async(dispatch_get_main_queue(), ^{
 		if (!gPanels) gPanels = [NSMutableArray new];
 
-		// Buttons come from the category, same as the notification would have.
-		NSMutableArray<NSDictionary *> *actions = [NSMutableArray new];
+		// Buttons from the category, same as the notification would have,
+		// then Dismiss. The first one is filled with the status colour.
+		NSMutableArray<NSDictionary *> *buttons = [NSMutableArray new];
 		for (UNNotificationAction *a in gCategories[category].actions) {
 			if (![a.identifier hasPrefix:@"a"]) continue;
-			[actions addObject:@{
+			[buttons addObject:@{
 				@"code" : @([[a.identifier substringFromIndex:1] intValue]),
 				@"title" : a.title,
 			}];
 		}
+		[buttons addObject:@{@"code" : @(-1), @"title" : @"Dismiss"}];
 
-		CGFloat pad = 14, inner = kPanelWidth - pad * 2, closeSize = 20;
+		CGFloat pad = 14, inner = kPanelWidth - pad * 2, dot = 7, textX = pad + dot + 8;
+		CGFloat textW = kPanelWidth - textX - pad;
 		NSTextField *titleLabel = [NSTextField wrappingLabelWithString:title];
 		titleLabel.font = [NSFont systemFontOfSize:13 weight:NSFontWeightSemibold];
 		titleLabel.textColor = ftInk();
-		titleLabel.preferredMaxLayoutWidth = inner - closeSize - 6;
-		NSSize titleSize = [titleLabel sizeThatFits:NSMakeSize(inner - closeSize - 6, CGFLOAT_MAX)];
+		titleLabel.preferredMaxLayoutWidth = textW;
+		NSSize titleSize = [titleLabel sizeThatFits:NSMakeSize(textW, CGFLOAT_MAX)];
 
 		NSTextField *bodyLabel = [NSTextField wrappingLabelWithString:body];
 		bodyLabel.font = [NSFont systemFontOfSize:12];
 		bodyLabel.textColor = ftInk();
-		bodyLabel.preferredMaxLayoutWidth = inner;
-		NSSize bodySize = body.length ? [bodyLabel sizeThatFits:NSMakeSize(inner, CGFLOAT_MAX)] : NSZeroSize;
+		bodyLabel.preferredMaxLayoutWidth = textW;
+		NSSize bodySize = body.length ? [bodyLabel sizeThatFits:NSMakeSize(textW, CGFLOAT_MAX)] : NSZeroSize;
 
 		CGFloat y = pad;
-		titleLabel.frame = NSMakeRect(pad, y, inner - closeSize - 6, titleSize.height);
+		titleLabel.frame = NSMakeRect(textX, y, textW, titleSize.height);
+		// Centre the dot on the title's first line.
+		CGFloat dotY = y + (titleLabel.font.ascender - titleLabel.font.descender) / 2 - dot / 2 + 1;
 		y += titleSize.height;
 		if (body.length) {
-			y += 3;
-			bodyLabel.frame = NSMakeRect(pad, y, inner, bodySize.height);
+			y += 2;
+			bodyLabel.frame = NSMakeRect(textX, y, textW, bodySize.height);
 			y += bodySize.height;
 		}
 		CGFloat buttonsY = y + 12, buttonH = 28;
-		if (actions.count) y = buttonsY + buttonH;
-		CGFloat height = y + pad;
+		y = buttonsY + buttonH;
+		BOOL timed = seconds > 0;
+		CGFloat height = y + pad + (timed ? kBarHeight : 0);
 
 		FTPanel *panel = nil;
 		for (FTPanel *p in gPanels) {
@@ -576,15 +676,15 @@ static void showPanel(NSString *ident, NSString *category, NSString *title, NSSt
 			        display:NO];
 		}
 		panel.appearance = panelAppearance();
-		// A prompt with two choices waits for an answer; the rest step aside.
-		panel.lifetime = actions.count >= 2 ? 0 : actions.count == 1 ? 20 : 8;
+		panel.lifetime = seconds;
+		panel.held = NO;
 
 		__weak FTPanel *weak = panel;
 		void (^respond)(int32_t) = ^(int32_t code) {
 			FTPanel *p = weak;
 			if (!p || p.closing) return;
 			closePanel(p);
-			emit(1, kind, code);
+			if (code >= 0) emit(1, kind, code);
 		};
 
 		FTCard *card = [[FTCard alloc] initWithFrame:NSMakeRect(0, 0, kPanelWidth, height)];
@@ -592,36 +692,44 @@ static void showPanel(NSString *ident, NSString *category, NSString *title, NSSt
 		card.onClick = ^{ respond(0); };
 		card.onHover = ^(BOOL inside) {
 			FTPanel *p = weak;
-			if (!p) return;
-			// Hold still while the pointer is on it.
-			if (inside) p.timerGen++;
-			else armTimer(p, 4);
+			if (p) holdPanel(p, inside);
 		};
+
+		FTDot *dotView = [[FTDot alloc] initWithFrame:NSMakeRect(pad, dotY, dot, dot)];
+		dotView.tone = tone;
+		[card addSubview:dotView];
 		[card addSubview:titleLabel];
 		if (body.length) [card addSubview:bodyLabel];
 
-		FTPill *close = [[FTPill alloc] initWithFrame:NSMakeRect(kPanelWidth - pad - closeSize + 4, pad - 2, closeSize, closeSize)];
-		close.style = FTPillClose;
-		close.onPress = ^{
-			FTPanel *p = weak;
-			if (p) closePanel(p);
-		};
-		[card addSubview:close];
-
-		CGFloat bw = actions.count == 2 ? (inner - 8) / 2 : inner;
-		for (NSUInteger i = 0; i < actions.count; i++) {
+		NSUInteger count = buttons.count;
+		CGFloat bw = (inner - 8 * (count - 1)) / count;
+		for (NSUInteger i = 0; i < count; i++) {
 			FTPill *pill = [[FTPill alloc] initWithFrame:NSMakeRect(pad + i * (bw + 8), buttonsY, bw, buttonH)];
-			// With two choices the first leads; a lone button stays quiet.
-			pill.style = actions.count == 2 && i == 0 ? FTPillPrimary : FTPillSecondary;
-			pill.title = actions[i][@"title"];
-			int32_t code = [actions[i][@"code"] intValue];
+			// Neutral notices keep Dismiss quiet; colour is for status.
+			pill.filled = i == 0 && (tone != FTToneNeutral || count > 1);
+			pill.tone = tone;
+			pill.title = buttons[i][@"title"];
+			int32_t code = [buttons[i][@"code"] intValue];
 			pill.onPress = ^{ respond(code); };
 			[card addSubview:pill];
+		}
+
+		panel.bar = nil;
+		if (timed) {
+			FTBar *bar = [[FTBar alloc] initWithFrame:NSMakeRect(0, height - kBarHeight, kPanelWidth, kBarHeight)];
+			bar.tone = tone;
+			[card addSubview:bar];
+			panel.bar = bar;
 		}
 		panel.contentView = card;
 
 		layoutPanels(fresh ? panel : nil);
-		armTimer(panel, panel.lifetime);
+		if (timed) {
+			[panel.bar runFor:seconds];
+			armTimer(panel, seconds);
+		} else {
+			panel.timerGen++;
+		}
 		if (sound) [[NSSound soundNamed:@"Glass"] play];
 	});
 }
