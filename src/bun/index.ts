@@ -23,6 +23,7 @@ import {
 	NotifyKind,
 	refreshNotificationPermission,
 	requestNotificationPermission,
+	setNotificationTheme,
 } from "./notify";
 import {
 	bumpHour,
@@ -518,6 +519,7 @@ function applySettingsSideEffects(prev: Settings) {
 		// Reschedule so the new window takes effect immediately.
 		scheduleNext();
 	}
+	if (prev.theme !== settings.theme) setNotificationTheme(settings.theme);
 	if (status.enabled && prev.preventSystemSleep !== settings.preventSystemSleep) {
 		void requestSleepGuard(settings.preventSystemSleep);
 	}
@@ -786,6 +788,7 @@ status.notifications = initNotifications({
 		pushStatus();
 	},
 });
+setNotificationTheme(settings.theme);
 
 // Notification permission can change in System Settings at any time; check
 // again whenever the window comes forward.

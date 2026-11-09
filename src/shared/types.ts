@@ -11,7 +11,8 @@ export type PauseReason = null | "battery" | "call" | "lock";
 export type CallMode = "ask" | "pause" | "off";
 export const CALL_MODES: CallMode[] = ["ask", "pause", "off"];
 // unavailable: the native notification helper didn't load (dev without it).
-export type NotifyPermission = "unknown" | "allowed" | "denied" | "unavailable";
+// blocked: macOS refused to ask, because the build isn't developer-signed.
+export type NotifyPermission = "unknown" | "allowed" | "denied" | "blocked" | "unavailable";
 // off: not requested · pending: waiting on pmset / admin prompt
 // on: system sleep disabled · failed: prompt cancelled or pmset errored
 export type SleepGuardState = "off" | "pending" | "on" | "failed";

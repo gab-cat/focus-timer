@@ -1,4 +1,6 @@
-// Native notifications with buttons, via native/notify.m.
+// Native notifications with buttons, via native/notify.m. When macOS won't
+// deliver them (turned off, or an ad-hoc signed build), the helper shows the
+// same notice as a small floating panel instead, with the same buttons.
 //
 // If the helper library is missing (a dev run without `bun run native`), we
 // fall back to Electrobun's plain notifications: same text, no buttons.
@@ -7,7 +9,7 @@ import { Utils } from "electrobun/bun";
 import { dlopen, FFIType, JSCallback } from "bun:ffi";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
-import type { NotifyPermission } from "../shared/types";
+import type { NotifyPermission, ThemePref } from "../shared/types";
 
 // What a notification is about. Sent back with every response.
 export const NotifyKind = {
@@ -39,6 +41,7 @@ type Native = {
 	ft_notify_category: (id: Buffer, c1: number, t1: Buffer, c2: number, t2: Buffer) => void;
 	ft_notify_post: (id: Buffer, cat: Buffer, title: Buffer, body: Buffer, kind: number, sound: number) => void;
 	ft_notify_remove: (id: Buffer) => void;
+	ft_notify_theme: (theme: number) => void;
 };
 
 const c = (s: string) => Buffer.from(`${s}\0`, "utf8");
@@ -77,13 +80,15 @@ export function initNotifications(handlers: NotifyHandlers): NotifyPermission {
 				returns: FFIType.void,
 			},
 			ft_notify_remove: { args: [FFIType.ptr], returns: FFIType.void },
+			ft_notify_theme: { args: [FFIType.i32], returns: FFIType.void },
 		});
 		callback = new JSCallback(
 			(event: number, a: number, b: number) => {
 				if (event === 1) {
 					handlers.onResponse(a as NotifyKind, b as NotifyAction);
 				} else if (event === 2) {
-					permission = a === 2 ? "allowed" : a === 1 ? "denied" : "unknown";
+					// The helper keeps "blocked" over a later "not asked yet".
+					permission = a === 3 ? "blocked" : a === 2 ? "allowed" : a === 1 ? "denied" : "unknown";
 					handlers.onPermission(permission);
 				}
 			},
@@ -140,6 +145,11 @@ export function notify(n: Notice) {
 	} catch (err) {
 		console.error("Notification failed:", err);
 	}
+}
+
+// The fallback panel follows the app's theme setting.
+export function setNotificationTheme(theme: ThemePref) {
+	native?.ft_notify_theme(theme === "dark" ? 1 : theme === "light" ? 2 : 0);
 }
 
 export function clearNotification(id: string) {

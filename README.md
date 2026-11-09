@@ -80,13 +80,15 @@ A call is any app using the microphone for more than 10 seconds, read from CoreA
 
 The notification buttons come from a small native library, `native/notify.m`, built by `bun run native` (Xcode Command Line Tools) and bundled at `Resources/app/native/libftnotify.dylib`. Without it, the app falls back to plain notifications and the prompt shows in the window and the menu bar menu.
 
+When macOS won't deliver notifications, the same library shows each notice as a small floating panel in the top-right corner, with the same buttons. That happens when notifications are turned off in System Settings, and always on ad-hoc signed builds: macOS refuses to even ask for permission unless the app is signed with an Apple Developer ID. The panel never takes focus, shows over full-screen apps and follows the app's theme.
+
 ## Permissions
 
 | Permission | Why | When it's asked |
 | --- | --- | --- |
 | Accessibility | Posting mouse, scroll and key events | First session |
 | Administrator (once, optional) | `pmset disablesleep` | Session start, or once with **Skip the password** |
-| Notifications | The call prompt and the auto-stop notice | First session, or **Settings → Calls → Allow** |
+| Notifications (optional) | The call prompt and the auto-stop notice. Without it they show in a small panel instead | First session, or **Settings → Calls → Allow**. Developer ID builds only |
 
 ## Troubleshooting
 

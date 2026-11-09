@@ -164,13 +164,15 @@ function NotificationsRow({ status }: { status: JigglerStatus }) {
 		p === "allowed"
 			? "Allowed. The call prompt has End session and Keep running buttons."
 			: p === "denied"
-				? <span className="text-warn">Turned off in System Settings, so the call prompt only shows in this window.</span>
+				? "Turned off in System Settings. Prompts show in a small panel at the top right instead."
 				: p === "unknown"
 					? "macOS asks the first time a session starts. You can allow them now."
-					: "Not available in this build. The call prompt shows in this window instead.";
+					: p === "blocked"
+						? "macOS won't send notifications for this build. Prompts show in a small panel at the top right instead."
+						: "Not available in this build. The call prompt shows in this window instead.";
 
 	let control: React.ReactNode = null;
-	if (p === "allowed") {
+	if (p === "allowed" || p === "blocked") {
 		control = (
 			<LinkButton
 				disabled={sent}
