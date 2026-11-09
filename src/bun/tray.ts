@@ -1,4 +1,5 @@
 import { Tray } from "electrobun/bun";
+import { atLabel } from "../shared/time";
 import type { JigglerStatus, Settings } from "../shared/types";
 import { ACTION_LABELS } from "./actions";
 
@@ -6,6 +7,8 @@ export type TrayActions = {
 	toggleEnabled(): void;
 	triggerNow(): void;
 	setActionType(type: Settings["actionType"]): void;
+	endForCall(): void;
+	cancelCallHold(): void;
 	showWindow(): void;
 	quit(): void;
 };
@@ -17,11 +20,12 @@ let actions: TrayActions | null = null;
 const clock = new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit" });
 
 function statusLine(status: JigglerStatus): string {
+	if (status.callHold) return "Off for a call · starts again after";
 	if (status.pauseReason) {
 		const map: Record<NonNullable<JigglerStatus["pauseReason"]>, string> = {
-			battery: "Paused — battery",
-			call: "Paused — on call",
-			lock: "Paused — screen locked",
+			battery: "Paused · on battery",
+			call: "Paused · on a call",
+			lock: "Paused · screen locked",
 		};
 		return map[status.pauseReason];
 	}
@@ -33,32 +37,53 @@ function statusLine(status: JigglerStatus): string {
 	return "Active";
 }
 
-function buildMenu(status: JigglerStatus, settings: Settings) {
+type Item =
+	| { type: "divider" }
+	| {
+			type: "normal";
+			label: string;
+			action?: string;
+			enabled?: boolean;
+			checked?: boolean;
+			submenu?: Item[];
+	  };
+
+function buildMenu(status: JigglerStatus, settings: Settings): Item[] {
+	const info: Item[] = [{ type: "normal", label: statusLine(status), enabled: false }];
+	if (status.enabled && status.autoStopAt) {
+		info.push({ type: "normal", label: `Stops ${atLabel(status.autoStopAt)}`, enabled: false });
+	}
+	const call: Item[] = [];
+	if (status.enabled && status.callPrompt) {
+		call.push({ type: "normal", label: "End session for this call", action: "end-for-call" });
+	}
+	if (status.callHold) {
+		call.push({ type: "normal", label: "Don't start again after the call", action: "cancel-hold" });
+	}
 	return [
-		{ type: "normal" as const, label: statusLine(status), enabled: false },
-		{ type: "divider" as const },
+		...info,
+		{ type: "divider" },
+		...call,
 		{
-			type: "normal" as const,
-			label: status.enabled ? "Pause" : "Resume",
+			type: "normal",
+			label: status.enabled ? "End session" : "Start session",
 			action: "toggle",
 		},
-		{ type: "normal" as const, label: "Refresh Now", action: "trigger" },
-		{ type: "divider" as const },
+		{ type: "normal", label: "Move now", action: "trigger" },
+		{ type: "divider" },
 		{
-			type: "normal" as const,
+			type: "normal",
 			label: "Action",
-			submenu: (Object.keys(ACTION_LABELS) as Array<Settings["actionType"]>).map(
-				(key) => ({
-					type: "normal" as const,
-					label: ACTION_LABELS[key],
-					action: `action:${key}`,
-					checked: settings.actionType === key,
-				}),
-			),
+			submenu: (Object.keys(ACTION_LABELS) as Array<Settings["actionType"]>).map((key) => ({
+				type: "normal" as const,
+				label: ACTION_LABELS[key],
+				action: `action:${key}`,
+				checked: settings.actionType === key,
+			})),
 		},
-		{ type: "divider" as const },
-		{ type: "normal" as const, label: "Show Window", action: "show" },
-		{ type: "normal" as const, label: "Quit", action: "quit" },
+		{ type: "divider" },
+		{ type: "normal", label: "Show window", action: "show" },
+		{ type: "normal", label: "Quit", action: "quit" },
 	];
 }
 
@@ -70,6 +95,8 @@ export function setupTray(imagePath: string, handlers: TrayActions) {
 		if (!action || !actions) return;
 		if (action === "toggle") actions.toggleEnabled();
 		else if (action === "trigger") actions.triggerNow();
+		else if (action === "end-for-call") actions.endForCall();
+		else if (action === "cancel-hold") actions.cancelCallHold();
 		else if (action === "show") actions.showWindow();
 		else if (action === "quit") actions.quit();
 		else if (action.startsWith("action:")) {
@@ -88,5 +115,5 @@ export function updateTray(status: JigglerStatus, settings: Settings) {
 	const json = JSON.stringify(menu);
 	if (json === lastMenuJson) return;
 	lastMenuJson = json;
-	tray.setMenu(menu);
+	tray.setMenu(menu as Parameters<Tray["setMenu"]>[0]);
 }

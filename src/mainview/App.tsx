@@ -36,6 +36,11 @@ const INITIAL_STATUS: JigglerStatus = {
 	lastRoutine: null,
 	sleepGuard: "off",
 	recent: [],
+	onCall: false,
+	callApp: null,
+	callPrompt: false,
+	callHold: false,
+	notifications: "unavailable",
 };
 
 const INITIAL_APP_INFO: AppInfo = {
@@ -56,6 +61,20 @@ const INITIAL_STATS: Stats = {
 	hourly: {},
 	routines: {},
 };
+
+// Marks scrolled views so their top edge feathers out under the title bar.
+function useScrollEdges() {
+	useEffect(() => {
+		const onScroll = (e: Event) => {
+			const el = e.target;
+			if (!(el instanceof HTMLElement) || !el.classList.contains("scroll-soft")) return;
+			const scrolled = String(el.scrollTop > 4);
+			if (el.dataset.scrolled !== scrolled) el.dataset.scrolled = scrolled;
+		};
+		document.addEventListener("scroll", onScroll, { capture: true, passive: true });
+		return () => document.removeEventListener("scroll", onScroll, { capture: true });
+	}, []);
+}
 
 type Tab = "focus" | "insights" | "settings";
 const TABS: Tab[] = ["focus", "insights", "settings"];
@@ -88,6 +107,7 @@ function App() {
 	const [, force] = useState(0);
 
 	useTheme(settings.theme);
+	useScrollEdges();
 
 	useEffect(() => {
 		const sync = () => {
@@ -197,7 +217,7 @@ function App() {
 		) : t === "insights" ? (
 			<Insights stats={stats} />
 		) : (
-			<SettingsView settings={settings} appInfo={appInfo} />
+			<SettingsView settings={settings} appInfo={appInfo} status={status} />
 		);
 
 	return (

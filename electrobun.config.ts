@@ -30,6 +30,8 @@ export default {
 			"dist/assets": "views/mainview/assets",
 			"dist/tray-icon.png": "views/mainview/tray-icon.png",
 			"dist/favicon.png": "views/mainview/favicon.png",
+			// Actionable notifications (native/notify.m, built by `bun run native`).
+			"native/build/libftnotify.dylib": "native/libftnotify.dylib",
 		},
 		// Ignore Vite output in watch mode — HMR handles view rebuilds separately
 		watchIgnore: ["dist/**"],

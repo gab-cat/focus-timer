@@ -13,6 +13,8 @@ Focus Timer is built with Electrobun, Bun, React, Vite, and Tailwind CSS. It pro
 - Optionally blocks system sleep entirely (`pmset -a disablesleep 1`) for the session, even with the lid closed, and restores it afterwards, including after a crash
 - Four actions: ⌘-Tab (default), Mouse only, Scroll, Shift tap
 - Acts only once you've been idle for a while, and pauses when the screen is locked, you're on a call, or (optionally) on battery
+- **Calls**: notices a call when any app uses the microphone (Zoom, Teams, FaceTime, Slack, Meet in a browser). Moves pause, and a notification offers **End session**; if you end it, the session starts again when the call ends, keeping its stop time
+- **Auto-stop**: end a session after a set time (30m, 1h, 2h, 4h or any number of minutes) or at a clock time like 6:30 PM. The Focus screen shows when it will stop before you start
 - **Insights**: today / 7-day / all-time totals, a 7×24 heatmap of when it moved, and the action mix
 - Runs periodic refresh cycles at randomized intervals
 - Shows the next cycle countdown, last refresh time, and total cycle count
@@ -68,12 +70,23 @@ To skip the prompts, use **Settings → No password → Set up**. This installs 
 
 If the app quits unexpectedly mid-session, the next launch restores normal sleep.
 
+## Calls
+
+A call is any app using the microphone for more than 10 seconds, read from CoreAudio (the same signal as the orange microphone dot). It ends after 30 seconds of quiet. Siri, dictation and Voice Control are ignored. **Settings → Calls → When a call starts** has three modes:
+
+- **Ask** (default): moves pause and a notification offers **End session** or **Keep running**. If you end it, the session starts again when the call ends, with the same stop time. The sleep block stays on in between, so no password prompt appears mid-call.
+- **Pause**: moves pause until the call ends.
+- **Off**: calls change nothing.
+
+The notification buttons come from a small native library, `native/notify.m`, built by `bun run native` (Xcode Command Line Tools) and bundled at `Resources/app/native/libftnotify.dylib`. Without it, the app falls back to plain notifications and the prompt shows in the window and the menu bar menu.
+
 ## Permissions
 
 | Permission | Why | When it's asked |
 | --- | --- | --- |
 | Accessibility | Posting mouse, scroll and key events | First session |
 | Administrator (once, optional) | `pmset disablesleep` | Session start, or once with **Skip the password** |
+| Notifications | The call prompt and the auto-stop notice | First session, or **Settings → Calls → Allow** |
 
 ## Troubleshooting
 
@@ -94,6 +107,8 @@ codesign --force --sign - node_modules/electrobun/bin/electrobun
 | `bun run hmr` | Start the Vite dev server on port `5173` |
 | `bun run build:canary` | Build the canary desktop app |
 | `bun run ensure-cli` | Re-sign the Electrobun CLI if macOS would kill it |
+| `bun run native` | Build the notification library in `native/` (runs before `start`, `dev` and `build`) |
+| `bun test` | Run the unit tests (auto-stop times, call detection, settings migration) |
 
 ## Project Structure
 
@@ -101,23 +116,31 @@ codesign --force --sign - node_modules/electrobun/bin/electrobun
 .
 ├── assets/
 │   └── logo.svg
+├── native/
+│   └── notify.m          # notifications with buttons (UserNotifications)
 ├── scripts/
-│   └── build-icons.ts
+│   ├── build-icons.ts
+│   └── build-native.ts   # compiles native/notify.m
 ├── src/
 │   ├── bun/
-│   │   └── index.ts
+│   │   ├── index.ts      # session, auto-stop and call flow
+│   │   ├── calltracker.ts
+│   │   ├── mic.ts        # microphone-in-use check via CoreAudio
+│   │   ├── notify.ts
+│   │   ├── settings.ts
+│   │   ├── sleepguard.ts
+│   │   └── tray.ts
 │   ├── mainview/
 │   │   ├── App.tsx
-│   │   ├── index.css
-│   │   ├── index.html
-│   │   ├── main.tsx
+│   │   ├── AutoStop.tsx
+│   │   ├── Focus.tsx
+│   │   ├── Settings.tsx
 │   │   └── rpc.ts
 │   └── shared/
+│       ├── time.ts       # auto-stop times and labels
 │       └── types.ts
 ├── electrobun.config.ts
 ├── package.json
-├── tailwind.config.js
-├── tsconfig.json
 └── vite.config.ts
 ```
 
@@ -130,6 +153,7 @@ The React view talks to the Bun process through Electrobun RPC:
 - `setEnabled` starts or stops a session
 - `getStatus` reads the current session state
 - `triggerNow` runs a manual refresh
+- `endForCall`, `dismissCallPrompt` and `cancelCallHold` answer the call prompt
 - `statusChanged` pushes updates back to the UI
 
 In development, the app attempts to load the Vite dev server from `http://localhost:5173`. If the dev server is not running, it falls back to the bundled `views://mainview/index.html` asset.
@@ -151,6 +175,6 @@ The main window title is configured in `src/bun/index.ts`.
 ## Notes
 
 - The app is currently optimized for macOS.
-- The window is fixed at `440x720`, with content drawn under a hidden-inset title bar.
+- The window is fixed at `380x600` (the same size as Voice Notes), with content drawn under a hidden-inset title bar. The Focus dial scales to the height it has.
 - Refresh timing defaults to 90–180 seconds, picked uniformly at random.
 - Built files are generated under `build/`.

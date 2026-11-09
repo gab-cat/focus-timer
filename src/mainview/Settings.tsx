@@ -2,16 +2,22 @@ import { useEffect, useState } from "react";
 import type {
 	ActionType,
 	AppInfo,
+	CallMode,
+	JigglerStatus,
 	Settings as SettingsType,
 	SleepHelperInfo,
 } from "../shared/types";
+import { AutoStopModePicker, AutoStopValue, stopEstimate } from "./AutoStop";
 import { minuteRange, minutesLabel } from "./format";
 import {
 	checkForUpdate,
 	getSleepHelper,
 	installSleepHelper,
+	openNotificationSettings,
 	removeSleepHelper,
+	requestNotifications,
 	resetStats,
+	sendTestNotification,
 	updateSettings,
 } from "./rpc";
 import { LinkButton, Row, Section, Segmented, Toggle } from "./ui";
@@ -135,6 +141,68 @@ function SleepHelperRow() {
 	);
 }
 
+const CALL_MODE_COPY: Record<CallMode, string> = {
+	ask: "Pauses moves and asks whether to end the session. If you end it, it starts again when the call ends.",
+	pause: "Pauses moves until the call ends. The session stays on.",
+	off: "Moves carry on during calls.",
+};
+
+function NotificationsRow({ status }: { status: JigglerStatus }) {
+	const [sent, setSent] = useState(false);
+	const [asking, setAsking] = useState(false);
+	useEffect(() => {
+		if (!sent) return;
+		const t = setTimeout(() => setSent(false), 2400);
+		return () => clearTimeout(t);
+	}, [sent]);
+	useEffect(() => {
+		if (status.notifications !== "unknown") setAsking(false);
+	}, [status.notifications]);
+
+	const p = status.notifications;
+	const description =
+		p === "allowed"
+			? "Allowed. The call prompt has End session and Keep running buttons."
+			: p === "denied"
+				? <span className="text-warn">Turned off in System Settings, so the call prompt only shows in this window.</span>
+				: p === "unknown"
+					? "macOS asks the first time a session starts. You can allow them now."
+					: "Not available in this build. The call prompt shows in this window instead.";
+
+	let control: React.ReactNode = null;
+	if (p === "allowed") {
+		control = (
+			<LinkButton
+				disabled={sent}
+				onClick={() => {
+					void sendTestNotification();
+					setSent(true);
+				}}
+			>
+				<span key={String(sent)} className="animate-swap inline-block">
+					{sent ? "Sent" : "Send a test"}
+				</span>
+			</LinkButton>
+		);
+	} else if (p === "denied") {
+		control = <LinkButton onClick={() => void openNotificationSettings()}>Open settings</LinkButton>;
+	} else if (p === "unknown") {
+		control = (
+			<button
+				disabled={asking}
+				onClick={() => {
+					setAsking(true);
+					void requestNotifications();
+				}}
+				className="press h-[28px] rounded-[9px] bg-ink px-3 text-[12px] font-semibold text-bg transition-opacity hover:opacity-90 disabled:opacity-40"
+			>
+				{asking ? "Waiting…" : "Allow"}
+			</button>
+		);
+	}
+	return <Row icon="bell" title="Notifications" description={description} control={control} />;
+}
+
 function DataRow() {
 	const [confirm, setConfirm] = useState(false);
 	return (
@@ -223,12 +291,20 @@ function VersionFooter({ info }: { info: AppInfo }) {
 	);
 }
 
-export function Settings({ settings, appInfo }: { settings: SettingsType; appInfo: AppInfo }) {
+export function Settings({
+	settings,
+	appInfo,
+	status,
+}: {
+	settings: SettingsType;
+	appInfo: AppInfo;
+	status: JigglerStatus;
+}) {
 	const pace = paceOf(settings);
 	const paceText = `Every ${minuteRange(settings.minDelayMs, settings.maxDelayMs)} once you're ${minutesLabel(settings.idleThresholdMs)} idle`;
 
 	return (
-		<div className="no-scrollbar h-full space-y-5 overflow-y-auto px-5 pb-6">
+		<div className="no-scrollbar scroll-soft h-full space-y-5 overflow-y-auto px-4 pb-6 pt-1">
 			<Section title="How it moves" index={0}>
 				<ModePicker value={settings.actionType} />
 			</Section>
@@ -261,19 +337,45 @@ export function Settings({ settings, appInfo }: { settings: SettingsType; appInf
 					control={<Toggle label="Pause when locked" value={settings.pauseOnLock} onChange={(v) => patch({ pauseOnLock: v })} />}
 				/>
 				<Row
-					icon="phone"
-					title="On a call"
-					description="Zoom, Teams, FaceTime, Webex, Discord."
-					control={<Toggle label="Pause on calls" value={settings.pauseOnCall} onChange={(v) => patch({ pauseOnCall: v })} />}
-				/>
-				<Row
 					icon="battery"
 					title="On battery"
 					control={<Toggle label="Pause on battery" value={settings.pauseOnBattery} onChange={(v) => patch({ pauseOnBattery: v })} />}
 				/>
 			</Section>
 
-			<Section title="Keep awake" index={3}>
+			<Section title="Calls" hint="Any app using the microphone" index={3}>
+				<Row icon="phone" title="When a call starts" description={CALL_MODE_COPY[settings.callMode]}>
+					<div className="mt-3 pl-7">
+						<Segmented
+							size="sm"
+							label="When a call starts"
+							value={settings.callMode}
+							onChange={(v) => patch({ callMode: v })}
+							options={[
+								{ value: "ask" as CallMode, label: "Ask" },
+								{ value: "pause" as CallMode, label: "Pause" },
+								{ value: "off" as CallMode, label: "Off" },
+							]}
+						/>
+					</div>
+				</Row>
+				{settings.callMode === "ask" ? <NotificationsRow status={status} /> : null}
+			</Section>
+
+			<Section title="Auto-stop" index={4}>
+				<Row icon="timer" title="End the session" description={stopEstimate(settings, status, Date.now())}>
+					<div className="mt-3 space-y-3 pl-7">
+						<AutoStopModePicker settings={settings} />
+						{settings.autoStopMs || settings.autoStopTime ? (
+							<div key={settings.autoStopTime ? "at" : "after"} className="animate-swap">
+								<AutoStopValue settings={settings} />
+							</div>
+						) : null}
+					</div>
+				</Row>
+			</Section>
+
+			<Section title="Keep awake" index={5}>
 				<Row
 					icon="moon"
 					title="Block system sleep"
@@ -287,28 +389,9 @@ export function Settings({ settings, appInfo }: { settings: SettingsType; appInf
 					}
 				/>
 				{settings.preventSystemSleep ? <SleepHelperRow /> : null}
-				<Row
-					icon="timer"
-					title="Auto-stop"
-					control={
-						<Segmented
-							size="sm"
-							label="Auto-stop"
-							value={settings.autoStopMs}
-							onChange={(v) => patch({ autoStopMs: v })}
-							options={[
-								{ value: null, label: "Off" },
-								{ value: 30 * 60_000, label: "30m" },
-								{ value: 60 * 60_000, label: "1h" },
-								{ value: 2 * 60 * 60_000, label: "2h" },
-								{ value: 4 * 60 * 60_000, label: "4h" },
-							]}
-						/>
-					}
-				/>
 			</Section>
 
-			<Section title="General" index={4}>
+			<Section title="General" index={6}>
 				<Row
 					title="Appearance"
 					control={

@@ -199,7 +199,7 @@ export function Insights({ stats }: { stats: Stats }) {
 	);
 
 	return (
-		<div className="no-scrollbar h-full space-y-3 overflow-y-auto px-5 pb-6">
+		<div className="no-scrollbar scroll-soft h-full space-y-3 overflow-y-auto px-4 pb-6 pt-1">
 			<div className="panel flex divide-x divide-line/70">
 				<Total label="Today" value={stats.today.count} index={0} />
 				<Total label="Last 7 days" value={week} index={1} />

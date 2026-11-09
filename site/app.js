@@ -1181,7 +1181,7 @@
 			<h3 class="sec-title">Pause when</h3>
 			<div class="panel rows">
 				${row("lock", "Screen is locked", "", "pauseOnLock")}
-				${row("phone", "On a call", "Zoom, Teams, FaceTime, Webex, Discord.", "pauseOnCall")}
+				${row("phone", "On a call", "Any app using the microphone: Zoom, Teams, Meet, FaceTime.", "pauseOnCall")}
 				${row("battery", "On battery", "", "pauseOnBattery")}
 			</div>
 			<h3 class="sec-title">Keep awake</h3>

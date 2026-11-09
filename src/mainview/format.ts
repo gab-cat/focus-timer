@@ -1,20 +1,12 @@
 import type { JigglerStatus } from "../shared/types";
 
+export { duration } from "../shared/time";
+
 export function mmss(ms: number) {
 	const total = Math.max(0, Math.round(ms / 1000));
 	const m = Math.floor(total / 60);
 	const s = total % 60;
 	return `${m}:${s.toString().padStart(2, "0")}`;
-}
-
-// 1h 04m · 12m · 45s
-export function duration(ms: number) {
-	const total = Math.max(0, Math.round(ms / 1000));
-	const h = Math.floor(total / 3600);
-	const m = Math.floor((total % 3600) / 60);
-	if (h > 0) return `${h}h ${m.toString().padStart(2, "0")}m`;
-	if (m > 0) return `${m}m`;
-	return `${total}s`;
 }
 
 export function ago(ts: number | null) {

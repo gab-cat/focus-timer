@@ -98,6 +98,22 @@ body::after {
 	display: none;
 }
 
+/* Content feathers out under the title bar once a view is scrolled, instead
+   of being cut by a hard edge. App sets data-scrolled on scroll. */
+@property --fade-top {
+	syntax: "<length>";
+	inherits: false;
+	initial-value: 0px;
+}
+.scroll-soft {
+	-webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 var(--fade-top));
+	mask-image: linear-gradient(to bottom, transparent 0, #000 var(--fade-top));
+	transition: --fade-top 240ms ease-out;
+}
+.scroll-soft[data-scrolled="true"] {
+	--fade-top: 22px;
+}
+
 /* Odometer window (see Rolling): taller than the digit and faded at both
    ends, so rolling digits melt in and out instead of being sliced by a hard
    edge. Negative margins keep the layout box at 1em. */
@@ -522,7 +538,7 @@ body::after {
 @layer components {
 	/* Flat surface with a 1px top highlight, like light catching an edge. */
 	.panel {
-		@apply rounded-[18px] bg-surface;
+		@apply rounded-[8px] bg-surface;
 		box-shadow:
 			inset 0 1px 0 rgb(255 255 255 / 0.04),
 			0 0 0 1px rgb(var(--line) / 0.9);

@@ -4,6 +4,14 @@ export type ActionType = "cmdtab" | "mouse" | "scroll" | "shift";
 export const ACTION_TYPES: ActionType[] = ["cmdtab", "mouse", "scroll", "shift"];
 export type ThemePref = "auto" | "dark" | "light";
 export type PauseReason = null | "battery" | "call" | "lock";
+// What happens when a call starts mid-session (a call = an app using the mic).
+// ask: pause moves and send a notification offering to end the session; if
+//      ended, it starts again when the call ends.
+// pause: pause moves until the call ends. off: calls change nothing.
+export type CallMode = "ask" | "pause" | "off";
+export const CALL_MODES: CallMode[] = ["ask", "pause", "off"];
+// unavailable: the native notification helper didn't load (dev without it).
+export type NotifyPermission = "unknown" | "allowed" | "denied" | "unavailable";
 // off: not requested · pending: waiting on pmset / admin prompt
 // on: system sleep disabled · failed: prompt cancelled or pmset errored
 export type SleepGuardState = "off" | "pending" | "on" | "failed";
@@ -14,9 +22,13 @@ export type Settings = {
 	idleThresholdMs: number;
 	actionType: ActionType;
 	pauseOnBattery: boolean;
-	pauseOnCall: boolean;
+	callMode: CallMode;
 	pauseOnLock: boolean;
+	// Auto-stop: at most one of these is set. autoStopMs stops the session
+	// that long after it starts; autoStopTime ("HH:MM", local) stops it at the
+	// next time the clock reads that.
 	autoStopMs: number | null;
+	autoStopTime: string | null;
 	// Equivalent of `pmset -a disablesleep 1` for the duration of a session.
 	preventSystemSleep: boolean;
 	windowX: number | null;
@@ -30,9 +42,10 @@ export const DEFAULT_SETTINGS: Settings = {
 	idleThresholdMs: 2 * 60 * 1000,
 	actionType: "cmdtab",
 	pauseOnBattery: false,
-	pauseOnCall: true,
+	callMode: "ask",
 	pauseOnLock: true,
 	autoStopMs: null,
+	autoStopTime: null,
 	preventSystemSleep: true,
 	windowX: null,
 	windowY: null,
@@ -64,6 +77,15 @@ export type JigglerStatus = {
 	sleepGuard: SleepGuardState;
 	// Recent actions (newest last), for the activity trace.
 	recent: Array<{ at: number; routine: string }>;
+	// A call is in progress (debounced microphone use).
+	onCall: boolean;
+	// The app using the microphone, when known ("Microsoft Teams").
+	callApp: string | null;
+	// Asking whether to end the session for this call.
+	callPrompt: boolean;
+	// The session was ended for a call and starts again when the call ends.
+	callHold: boolean;
+	notifications: NotifyPermission;
 };
 
 export type SleepHelperInfo = {
@@ -110,6 +132,15 @@ export type JigglerRPC = {
 			getSleepHelper: { params: {}; response: SleepHelperInfo };
 			installSleepHelper: { params: {}; response: SleepHelperInfo };
 			removeSleepHelper: { params: {}; response: SleepHelperInfo };
+			// End the session for the current call; it restarts when the call ends.
+			endForCall: { params: {}; response: JigglerStatus };
+			// Keep the session running through this call and stop asking.
+			dismissCallPrompt: { params: {}; response: JigglerStatus };
+			// Don't restart the session when the call ends.
+			cancelCallHold: { params: {}; response: JigglerStatus };
+			requestNotifications: { params: {}; response: JigglerStatus };
+			openNotificationSettings: { params: {}; response: void };
+			sendTestNotification: { params: {}; response: JigglerStatus };
 		};
 		messages: {};
 	}>;

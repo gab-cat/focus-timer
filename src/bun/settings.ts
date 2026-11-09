@@ -1,7 +1,9 @@
 import { mkdir } from "node:fs/promises";
 import { dirname } from "node:path";
+import { isClockTime, MAX_AUTO_STOP_MS } from "../shared/time";
 import {
 	ACTION_TYPES,
+	CALL_MODES,
 	DEFAULT_SETTINGS,
 	type Settings,
 	type Stats,
@@ -60,7 +62,7 @@ async function ensureDir(path: string) {
 	} catch {}
 }
 
-function sanitizeSettings(input: unknown): Settings {
+export function sanitizeSettings(input: unknown): Settings {
 	const out: Settings = { ...DEFAULT_SETTINGS };
 	if (!input || typeof input !== "object") return out;
 	const src = input as Record<string, unknown>;
@@ -74,6 +76,19 @@ function sanitizeSettings(input: unknown): Settings {
 	}
 	// Modes removed in later versions (e.g. "natural") fall back to the default.
 	if (!ACTION_TYPES.includes(out.actionType)) out.actionType = DEFAULT_SETTINGS.actionType;
+	// Before 1.5 calls were a pauseOnCall switch that fired whenever Zoom or
+	// Teams was merely open, so many people turned it off. Detection now uses
+	// the microphone, so that old value doesn't carry over: everyone starts on
+	// the default.
+	if (!CALL_MODES.includes(out.callMode)) out.callMode = DEFAULT_SETTINGS.callMode;
+	// Auto-stop: a positive duration up to 24h, or a valid "HH:MM", never both.
+	const ms = out.autoStopMs;
+	out.autoStopMs =
+		typeof ms === "number" && Number.isFinite(ms) && ms >= 60_000
+			? Math.min(Math.round(ms), MAX_AUTO_STOP_MS)
+			: null;
+	out.autoStopTime = isClockTime(out.autoStopTime) ? out.autoStopTime : null;
+	if (out.autoStopTime) out.autoStopMs = null;
 	// Cross-field validation
 	if (out.minDelayMs < 1000) out.minDelayMs = 1000;
 	if (out.maxDelayMs < out.minDelayMs) out.maxDelayMs = out.minDelayMs;

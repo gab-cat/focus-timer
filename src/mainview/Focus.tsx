@@ -1,10 +1,12 @@
-import { useEffect, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { atLabel, autoStopMode, plannedStopAt } from "../shared/time";
 import type { AppInfo, JigglerStatus, Settings } from "../shared/types";
+import { AutoStopModePicker, AutoStopValue, stopEstimate } from "./AutoStop";
 import { Buddy, moodFor } from "./Buddy";
 import { ago, duration, minutesLabel, mmss, pauseCopy, routineLabel } from "./format";
-import { retrySleepGuard } from "./rpc";
+import { cancelCallHold, dismissCallPrompt, endForCall, retrySleepGuard } from "./rpc";
 import { useUpdateInstall } from "./update";
-import { Icon, type IconName, Rolling } from "./ui";
+import { Icon, type IconName, LinkButton, Rolling } from "./ui";
 
 type DialState = "idle" | "active" | "paused";
 
@@ -298,18 +300,24 @@ function Chip({
 	tone = "default",
 	onClick,
 	index = 0,
+	buttonRef,
+	expanded,
 }: {
 	icon: IconName;
 	children: React.ReactNode;
 	tone?: "default" | "accent" | "warn";
 	onClick?: () => void;
 	index?: number;
+	buttonRef?: React.Ref<HTMLButtonElement>;
+	expanded?: boolean;
 }) {
 	const color =
 		tone === "accent" ? "text-accent" : tone === "warn" ? "text-warn" : "text-ink-2";
 	const Tag = onClick ? "button" : "span";
 	return (
 		<Tag
+			ref={buttonRef as never}
+			aria-expanded={expanded}
 			onClick={onClick}
 			className={`animate-swap inline-flex h-7 items-center gap-1.5 rounded-full bg-ink/[0.05] px-2.5 text-[11.5px] font-medium dark:bg-ink/[0.06] ${color} ${
 				onClick ? "press hover:bg-ink/[0.09]" : ""
@@ -352,6 +360,171 @@ function UpdateBanner({ info }: { info: AppInfo }) {
 			{busy ? null : <span className="font-medium">{failed ? "Try again →" : "Restart →"}</span>}
 		</button>
 	);
+}
+
+// One banner for call prompts. Buttons disable while the request is in flight
+// and the banner says so if it fails.
+function CallBanner({
+	text,
+	primary,
+	secondary,
+}: {
+	text: string;
+	primary?: { label: string; run: () => Promise<unknown> };
+	secondary: { label: string; run: () => Promise<unknown> };
+}) {
+	const [busy, setBusy] = useState(false);
+	const [failed, setFailed] = useState(false);
+	async function go(fn: () => Promise<unknown>) {
+		setBusy(true);
+		setFailed(false);
+		try {
+			await fn();
+		} catch {
+			setFailed(true);
+		} finally {
+			setBusy(false);
+		}
+	}
+	return (
+		<div
+			role="status"
+			className="animate-rise relative z-10 mb-3 rounded-lg border border-warn/30 bg-warn/[0.08] px-3.5 py-2.5"
+		>
+			<div className="flex items-start gap-2.5">
+				<Icon name="phone" size={15} className="mt-[1px] shrink-0 text-warn" />
+				<span className="min-w-0 flex-1 text-[12.5px] leading-[1.4] text-ink [text-wrap:pretty]">
+					{failed ? "That didn't go through. Try again." : text}
+				</span>
+			</div>
+			<span className="mt-2 flex items-center justify-end gap-3">
+				<LinkButton disabled={busy} onClick={() => void go(secondary.run)}>
+					{secondary.label}
+				</LinkButton>
+				{primary ? (
+					<button
+						disabled={busy}
+						onClick={() => void go(primary.run)}
+						className="press h-[28px] rounded-[8px] bg-ink px-3 text-[12px] font-semibold text-bg transition-opacity hover:opacity-90 disabled:opacity-40"
+					>
+						{busy ? "Ending…" : primary.label}
+					</button>
+				) : null}
+			</span>
+		</div>
+	);
+}
+
+// Chip that shows when the session stops, with a small editor to change it.
+function StopTime({
+	settings,
+	status,
+	now,
+	index,
+}: {
+	settings: Settings;
+	status: JigglerStatus;
+	now: number;
+	index: number;
+}) {
+	const [open, setOpen] = useState(false);
+	const panel = useRef<HTMLDivElement>(null);
+	const chip = useRef<HTMLButtonElement>(null);
+
+	useEffect(() => {
+		if (!open) return;
+		const onDown = (e: MouseEvent) => {
+			const t = e.target as Node;
+			if (panel.current?.contains(t) || chip.current?.contains(t)) return;
+			setOpen(false);
+		};
+		const onKey = (e: KeyboardEvent) => {
+			if (e.key !== "Escape") return;
+			setOpen(false);
+			chip.current?.focus();
+		};
+		document.addEventListener("mousedown", onDown);
+		document.addEventListener("keydown", onKey);
+		return () => {
+			document.removeEventListener("mousedown", onDown);
+			document.removeEventListener("keydown", onKey);
+		};
+	}, [open]);
+
+	const at = status.enabled ? status.autoStopAt : plannedStopAt(settings, now);
+	const label =
+		at == null
+			? "Set a stop time"
+			: status.enabled
+				? `Stops ${atLabel(at, now)} · ${duration(at - now)}`
+				: `Stops ${atLabel(at, now)}`;
+	const mode = autoStopMode(settings);
+
+	return (
+		<>
+			<Chip
+				icon="timer"
+				index={index}
+				tone={at != null && status.enabled ? "accent" : "default"}
+				onClick={() => setOpen((o) => !o)}
+				buttonRef={chip}
+				expanded={open}
+			>
+				{label}
+			</Chip>
+			{open ? (
+				<div
+					ref={panel}
+					role="dialog"
+					aria-label="Auto-stop"
+					className="animate-rise absolute inset-x-0 bottom-full z-30 mb-2 rounded-lg border border-line bg-surface p-3.5"
+				>
+					<div className="flex items-center justify-between gap-3">
+						<span className="text-[13px] font-semibold tracking-[-0.01em] text-ink">Auto-stop</span>
+						<AutoStopModePicker settings={settings} />
+					</div>
+					{mode !== "off" ? (
+						<div key={mode} className="animate-swap mt-3">
+							<AutoStopValue settings={settings} autoFocus />
+						</div>
+					) : null}
+					<div className="mt-3 flex items-center justify-between gap-3">
+						<span className="text-[12px] text-ink">{stopEstimate(settings, status, now)}</span>
+						<LinkButton
+							onClick={() => {
+								setOpen(false);
+								chip.current?.focus();
+							}}
+						>
+							Done
+						</LinkButton>
+					</div>
+				</div>
+			) : null}
+		</>
+	);
+}
+
+// The dial is drawn at SIZE and scaled down to fit the height it's given,
+// so a banner or a short window never pushes the buttons off screen.
+// Narration line (mt-4 + h-6) plus the gap above the trace (pb-3).
+const NARRATION_H = 52;
+function useDialScale(narration: boolean) {
+	const area = useRef<HTMLDivElement>(null);
+	const [scale, setScale] = useState(1);
+	useLayoutEffect(() => {
+		const el = area.current;
+		if (!el) return;
+		const fit = () => {
+			const s = Math.min(1, (el.clientHeight - (narration ? NARRATION_H : 12)) / SIZE, el.clientWidth / SIZE);
+			setScale(Math.max(0.45, Math.round(s * 100) / 100));
+		};
+		fit();
+		const ro = new ResizeObserver(fit);
+		ro.observe(el);
+		return () => ro.disconnect();
+	}, [narration]);
+	return { area, scale };
 }
 
 // What the stand-in says it just did.
@@ -427,12 +600,29 @@ export function Focus({
 		fresh: reacting || moving,
 	});
 	const tone = state === "active" ? "--accent" : state === "paused" ? "--warn" : "--ink-3";
+	// A call banner already says what's going on; drop the narration line
+	// under the dial then so the dial keeps its size.
+	const banner = (status.enabled && status.callPrompt) || status.callHold;
+	const { area: dialArea, scale } = useDialScale(!banner);
 
 	return (
-		<div className="relative flex h-full flex-col overflow-clip px-5 pb-5" data-state={state}>
+		<div className="relative flex h-full flex-col overflow-clip px-4 pb-4" data-state={state}>
 			<div className="ambient" />
 
 			{appInfo.updateReady ? <UpdateBanner info={appInfo} /> : null}
+
+			{status.enabled && status.callPrompt ? (
+				<CallBanner
+					text={`On a call${status.callApp ? ` in ${status.callApp}` : ""}. Moves are paused.`}
+					primary={{ label: "End session", run: endForCall }}
+					secondary={{ label: "Keep running", run: dismissCallPrompt }}
+				/>
+			) : status.callHold ? (
+				<CallBanner
+					text="Off for the call. It starts again when the call ends."
+					secondary={{ label: "Don't start again", run: cancelCallHold }}
+				/>
+			) : null}
 
 			{/* Status line */}
 			<div className="relative flex items-center justify-between">
@@ -446,8 +636,14 @@ export function Focus({
 									: "bg-ink/25"
 						}`}
 					/>
-					<span key={state} className="animate-swap text-[13px] font-semibold tracking-[-0.01em]">
-						{state === "active" ? "Active" : state === "paused" ? "Paused" : "Idle"}
+					<span key={`${state}${status.callHold}`} className="animate-swap text-[13px] font-semibold tracking-[-0.01em]">
+						{state === "active"
+							? "Active"
+							: state === "paused"
+								? "Paused"
+								: status.callHold
+									? "Off for a call"
+									: "Idle"}
 					</span>
 					{status.enabled ? (
 						<span className="animate-swap text-[12.5px] text-ink-3" style={{ ["--d" as string]: "80ms" }}>
@@ -467,62 +663,68 @@ export function Focus({
 			</div>
 
 			{/* Dial — takes the spare height so the layout breathes evenly. */}
-			<div className="relative flex flex-1 flex-col items-center justify-center">
-				<Dial
-					state={state}
-					progress={progress}
-					rewinding={rewinding}
-					lapKey={lapAt}
-					pulseKey={fresh ? status.lastActionAt : null}
-				>
-					<Buddy mood={mood} tone={tone} />
-					<div key={state} className="mt-3 flex flex-col items-center">
-						{state === "active" ? (
-							<>
-								{/* Keyed per wait: each new countdown slot-spins in. */}
-								<span key={status.waitStartedAt} className="animate-swap" style={{ ["--d" as string]: "120ms" }}>
-									<span className={`inline-block ${lapDone ? "animate-lap-pop" : ""}`}>
-										<Rolling
-											spin
-											text={mmss(remaining)}
-											className="tabular font-mono text-[44px] font-light tracking-[-0.04em]"
-										/>
-									</span>
-								</span>
-								<div className="animate-swap mt-2 text-[11.5px] text-ink-3" style={{ ["--d" as string]: "320ms" }}>
-									until next move
-								</div>
-							</>
-						) : state === "paused" && pause ? (
-							<>
-								<div
-									key={pause.title}
-									className="animate-swap max-w-[150px] truncate text-center text-[17px] font-semibold tracking-[-0.02em]"
-									style={{ ["--d" as string]: "100ms" }}
-								>
-									{pause.title}
-								</div>
-								{pause.detail ? (
-									<div className="animate-swap tabular mt-1 font-mono text-[11.5px] text-ink-3" style={{ ["--d" as string]: "220ms" }}>
-										{pause.detail}
-									</div>
-								) : null}
-							</>
-						) : (
-							<>
-								<div className="animate-swap text-[24px] font-semibold tracking-[-0.035em]" style={{ ["--d" as string]: "100ms" }}>
-									Ready
-								</div>
-								<div className="animate-swap mt-1 text-center text-[11.5px] leading-[1.45] text-ink-3" style={{ ["--d" as string]: "220ms" }}>
-									Moves after {minutesLabel(settings.idleThresholdMs)} idle
-								</div>
-							</>
-						)}
+			<div ref={dialArea} className="relative flex min-h-0 flex-1 flex-col items-center justify-center pb-3">
+				<div style={{ width: SIZE * scale, height: SIZE * scale }}>
+					<div style={{ transform: `scale(${scale})`, transformOrigin: "top left", width: SIZE }}>
+						<Dial
+							state={state}
+							progress={progress}
+							rewinding={rewinding}
+							lapKey={lapAt}
+							pulseKey={fresh ? status.lastActionAt : null}
+						>
+							<Buddy mood={mood} tone={tone} />
+							<div key={state} className="mt-3 flex flex-col items-center">
+								{state === "active" ? (
+									<>
+										{/* Keyed per wait: each new countdown slot-spins in. */}
+										<span key={status.waitStartedAt} className="animate-swap" style={{ ["--d" as string]: "120ms" }}>
+											<span className={`inline-block ${lapDone ? "animate-lap-pop" : ""}`}>
+												<Rolling
+													spin
+													text={mmss(remaining)}
+													className="tabular font-mono text-[44px] font-light tracking-[-0.04em]"
+												/>
+											</span>
+										</span>
+										<div className="animate-swap mt-2 text-[11.5px] text-ink-3" style={{ ["--d" as string]: "320ms" }}>
+											until next move
+										</div>
+									</>
+								) : state === "paused" && pause ? (
+									<>
+										<div
+											key={pause.title}
+											className="animate-swap max-w-[150px] truncate text-center text-[17px] font-semibold tracking-[-0.02em]"
+											style={{ ["--d" as string]: "100ms" }}
+										>
+											{pause.title}
+										</div>
+										{pause.detail ? (
+											<div className="animate-swap tabular mt-1 font-mono text-[11.5px] text-ink-3" style={{ ["--d" as string]: "220ms" }}>
+												{pause.detail}
+											</div>
+										) : null}
+									</>
+								) : (
+									<>
+										<div className="animate-swap text-[24px] font-semibold tracking-[-0.035em]" style={{ ["--d" as string]: "100ms" }}>
+											{status.callHold ? "On a call" : "Ready"}
+										</div>
+										<div className="animate-swap mt-1 max-w-[160px] text-center text-[11.5px] leading-[1.45] text-ink-3" style={{ ["--d" as string]: "220ms" }}>
+											{status.callHold
+												? "Starts again when it ends"
+												: `Moves after ${minutesLabel(settings.idleThresholdMs)} idle`}
+										</div>
+									</>
+								)}
+							</div>
+						</Dial>
 					</div>
-				</Dial>
+				</div>
 
 				{/* Narration */}
-				<div className="mt-4 flex h-6 items-center justify-center">
+				<div className={`mt-4 h-6 items-center justify-center ${banner ? "hidden" : "flex"}`}>
 					{state === "active" && status.lastActionAt ? (
 						<span
 							key={status.lastActionAt}
@@ -538,7 +740,9 @@ export function Focus({
 								? "Holding the fort until you step away"
 								: state === "paused"
 									? "Back on duty as soon as this clears"
-									: "Asleep until you press Space"}
+									: status.callHold
+										? "Napping through your call"
+										: "Asleep until you press Space"}
 						</span>
 					)}
 				</div>
@@ -547,7 +751,7 @@ export function Focus({
 			<div className="space-y-4">
 				<Trace recent={status.recent} active={state === "active"} />
 
-				<div className="flex min-h-7 flex-wrap items-center gap-1.5">
+				<div className="relative flex min-h-7 flex-wrap items-center gap-1.5">
 					{status.enabled && settings.preventSystemSleep ? (
 						status.sleepGuard === "on" ? (
 							<Chip icon="moon" tone="accent" index={0}>Sleep blocked</Chip>
@@ -559,9 +763,7 @@ export function Focus({
 							</Chip>
 						) : null
 					) : null}
-					{status.enabled && status.autoStopAt ? (
-						<Chip icon="timer" index={1}>{duration(status.autoStopAt - now)} left</Chip>
-					) : null}
+					<StopTime settings={settings} status={status} now={now} index={1} />
 					{!status.enabled ? (
 						<span className="animate-swap text-[11.5px] text-ink-3" style={{ ["--d" as string]: "300ms" }}>
 							{settings.preventSystemSleep

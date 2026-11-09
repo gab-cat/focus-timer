@@ -63,22 +63,6 @@ export async function isOnBattery(): Promise<boolean> {
 	});
 }
 
-// Heuristic call detection — looks for well-known meeting app processes.
-// Won't catch browser-based calls (Meet in Chrome) by design.
-const CALL_APP_REGEX =
-	/zoom\.us|Zoom\.app|Microsoft Teams|Webex|FaceTime|Discord|GoToMeeting|BlueJeans|Slack Helper.*[Cc]all/;
-
-export async function isOnCall(): Promise<boolean> {
-	return cached("call", 15_000, async () => {
-		try {
-			const out = await runShellOutput(["pgrep", "-lf", CALL_APP_REGEX.source]);
-			return out.trim().length > 0;
-		} catch {
-			return false;
-		}
-	});
-}
-
 export async function getSystemAppearance(): Promise<"dark" | "light"> {
 	try {
 		const out = await runShellOutput([
