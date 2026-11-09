@@ -35,6 +35,8 @@ const result = Bun.spawnSync(
 		"AppKit",
 		"-framework",
 		"QuartzCore",
+		"-framework",
+		"CoreAudio",
 		"-install_name",
 		"@rpath/libftnotify.dylib",
 		"-o",

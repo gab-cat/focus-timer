@@ -4,7 +4,7 @@ import type { AppInfo, JigglerStatus, Settings } from "../shared/types";
 import { AutoStopModePicker, AutoStopValue, stopEstimate } from "./AutoStop";
 import { Buddy, moodFor } from "./Buddy";
 import { ago, duration, minutesLabel, mmss, pauseCopy, routineLabel } from "./format";
-import { cancelCallHold, dismissCallPrompt, endForCall, retrySleepGuard } from "./rpc";
+import { retrySleepGuard } from "./rpc";
 import { useUpdateInstall } from "./update";
 import { Icon, type IconName, LinkButton, Rolling } from "./ui";
 
@@ -302,6 +302,7 @@ function Chip({
 	index = 0,
 	buttonRef,
 	expanded,
+	shrink = false,
 }: {
 	icon: IconName;
 	children: React.ReactNode;
@@ -310,6 +311,8 @@ function Chip({
 	index?: number;
 	buttonRef?: React.Ref<HTMLButtonElement>;
 	expanded?: boolean;
+	// Gives up width (truncating its label) when the row runs out of room.
+	shrink?: boolean;
 }) {
 	const color =
 		tone === "accent" ? "text-accent" : tone === "warn" ? "text-warn" : "text-ink-2";
@@ -319,13 +322,13 @@ function Chip({
 			ref={buttonRef as never}
 			aria-expanded={expanded}
 			onClick={onClick}
-			className={`animate-swap inline-flex h-7 items-center gap-1.5 rounded-full bg-ink/[0.05] px-2.5 text-[11.5px] font-medium dark:bg-ink/[0.06] ${color} ${
+			className={`animate-swap inline-flex h-7 items-center gap-1.5 rounded-full bg-ink/[0.05] px-2.5 text-[11.5px] font-medium dark:bg-ink/[0.06] ${shrink ? "min-w-0" : "shrink-0"} ${color} ${
 				onClick ? "press hover:bg-ink/[0.09]" : ""
 			}`}
 		style={{ ["--d" as string]: `${380 + index * 80}ms` }}
 		>
-			<Icon name={icon} size={13} />
-			{children}
+			<Icon name={icon} size={13} className="shrink-0" />
+			<span className="truncate">{children}</span>
 		</Tag>
 	);
 }
@@ -359,59 +362,6 @@ function UpdateBanner({ info }: { info: AppInfo }) {
 			</span>
 			{busy ? null : <span className="font-medium">{failed ? "Try again →" : "Restart →"}</span>}
 		</button>
-	);
-}
-
-// One banner for call prompts. Buttons disable while the request is in flight
-// and the banner says so if it fails.
-function CallBanner({
-	text,
-	primary,
-	secondary,
-}: {
-	text: string;
-	primary?: { label: string; run: () => Promise<unknown> };
-	secondary: { label: string; run: () => Promise<unknown> };
-}) {
-	const [busy, setBusy] = useState(false);
-	const [failed, setFailed] = useState(false);
-	async function go(fn: () => Promise<unknown>) {
-		setBusy(true);
-		setFailed(false);
-		try {
-			await fn();
-		} catch {
-			setFailed(true);
-		} finally {
-			setBusy(false);
-		}
-	}
-	return (
-		<div
-			role="status"
-			className="animate-rise relative z-10 mb-3 rounded-lg border border-warn/30 bg-warn/[0.08] px-3.5 py-2.5"
-		>
-			<div className="flex items-start gap-2.5">
-				<Icon name="phone" size={15} className="mt-[1px] shrink-0 text-warn" />
-				<span className="min-w-0 flex-1 text-[12.5px] leading-[1.4] text-ink [text-wrap:pretty]">
-					{failed ? "That didn't go through. Try again." : text}
-				</span>
-			</div>
-			<span className="mt-2 flex items-center justify-end gap-3">
-				<LinkButton disabled={busy} onClick={() => void go(secondary.run)}>
-					{secondary.label}
-				</LinkButton>
-				{primary ? (
-					<button
-						disabled={busy}
-						onClick={() => void go(primary.run)}
-						className="press h-[28px] rounded-[8px] bg-ink px-3 text-[12px] font-semibold text-bg transition-opacity hover:opacity-90 disabled:opacity-40"
-					>
-						{busy ? "Ending…" : primary.label}
-					</button>
-				) : null}
-			</span>
-		</div>
 	);
 }
 
@@ -469,6 +419,7 @@ function StopTime({
 				onClick={() => setOpen((o) => !o)}
 				buttonRef={chip}
 				expanded={open}
+				shrink
 			>
 				{label}
 			</Chip>
@@ -509,21 +460,21 @@ function StopTime({
 // so a banner or a short window never pushes the buttons off screen.
 // Narration line (mt-4 + h-6) plus the gap above the trace (pb-3).
 const NARRATION_H = 52;
-function useDialScale(narration: boolean) {
+function useDialScale() {
 	const area = useRef<HTMLDivElement>(null);
 	const [scale, setScale] = useState(1);
 	useLayoutEffect(() => {
 		const el = area.current;
 		if (!el) return;
 		const fit = () => {
-			const s = Math.min(1, (el.clientHeight - (narration ? NARRATION_H : 12)) / SIZE, el.clientWidth / SIZE);
+			const s = Math.min(1, (el.clientHeight - NARRATION_H) / SIZE, el.clientWidth / SIZE);
 			setScale(Math.max(0.45, Math.round(s * 100) / 100));
 		};
 		fit();
 		const ro = new ResizeObserver(fit);
 		ro.observe(el);
 		return () => ro.disconnect();
-	}, [narration]);
+	}, []);
 	return { area, scale };
 }
 
@@ -600,29 +551,13 @@ export function Focus({
 		fresh: reacting || moving,
 	});
 	const tone = state === "active" ? "--accent" : state === "paused" ? "--warn" : "--ink-3";
-	// A call banner already says what's going on; drop the narration line
-	// under the dial then so the dial keeps its size.
-	const banner = (status.enabled && status.callPrompt) || status.callHold;
-	const { area: dialArea, scale } = useDialScale(!banner);
+	const { area: dialArea, scale } = useDialScale();
 
 	return (
 		<div className="relative flex h-full flex-col overflow-clip px-4 pb-4" data-state={state}>
 			<div className="ambient" />
 
 			{appInfo.updateReady ? <UpdateBanner info={appInfo} /> : null}
-
-			{status.enabled && status.callPrompt ? (
-				<CallBanner
-					text={`On a call${status.callApp ? ` in ${status.callApp}` : ""}. Moves are paused.`}
-					primary={{ label: "End session", run: endForCall }}
-					secondary={{ label: "Keep running", run: dismissCallPrompt }}
-				/>
-			) : status.callHold ? (
-				<CallBanner
-					text="Off for the call. It starts again when the call ends."
-					secondary={{ label: "Don't start again", run: cancelCallHold }}
-				/>
-			) : null}
 
 			{/* Status line */}
 			<div className="relative flex items-center justify-between">
@@ -636,14 +571,12 @@ export function Focus({
 									: "bg-ink/25"
 						}`}
 					/>
-					<span key={`${state}${status.callHold}`} className="animate-swap text-[13px] font-semibold tracking-[-0.01em]">
+					<span key={state} className="animate-swap text-[13px] font-semibold tracking-[-0.01em]">
 						{state === "active"
 							? "Active"
 							: state === "paused"
 								? "Paused"
-								: status.callHold
-									? "Off for a call"
-									: "Idle"}
+								: "Idle"}
 					</span>
 					{status.enabled ? (
 						<span className="animate-swap text-[12.5px] text-ink-3" style={{ ["--d" as string]: "80ms" }}>
@@ -709,12 +642,10 @@ export function Focus({
 								) : (
 									<>
 										<div className="animate-swap text-[24px] font-semibold tracking-[-0.035em]" style={{ ["--d" as string]: "100ms" }}>
-											{status.callHold ? "On a call" : "Ready"}
+											Ready
 										</div>
 										<div className="animate-swap mt-1 max-w-[160px] text-center text-[11.5px] leading-[1.45] text-ink-3" style={{ ["--d" as string]: "220ms" }}>
-											{status.callHold
-												? "Starts again when it ends"
-												: `Moves after ${minutesLabel(settings.idleThresholdMs)} idle`}
+											{`Moves after ${minutesLabel(settings.idleThresholdMs)} idle`}
 										</div>
 									</>
 								)}
@@ -724,7 +655,7 @@ export function Focus({
 				</div>
 
 				{/* Narration */}
-				<div className={`mt-4 h-6 items-center justify-center ${banner ? "hidden" : "flex"}`}>
+				<div className="mt-4 flex h-6 items-center justify-center">
 					{state === "active" && status.lastActionAt ? (
 						<span
 							key={status.lastActionAt}
@@ -740,9 +671,7 @@ export function Focus({
 								? "Holding the fort until you step away"
 								: state === "paused"
 									? "Back on duty as soon as this clears"
-									: status.callHold
-										? "Napping through your call"
-										: "Asleep until you press Space"}
+									: "Asleep until you press Space"}
 						</span>
 					)}
 				</div>
@@ -751,12 +680,13 @@ export function Focus({
 			<div className="space-y-4">
 				<Trace recent={status.recent} active={state === "active"} />
 
-				<div className="relative flex min-h-7 flex-wrap items-center gap-1.5">
+				{/* One fixed-height line: a wrap here resizes the dial and trace. */}
+				<div className="relative flex h-7 items-center gap-1.5">
 					{status.enabled && settings.preventSystemSleep ? (
 						status.sleepGuard === "on" ? (
 							<Chip icon="moon" tone="accent" index={0}>Sleep blocked</Chip>
 						) : status.sleepGuard === "pending" ? (
-							<Chip icon="moon">Waiting for permission…</Chip>
+							<Chip icon="moon">Blocking sleep…</Chip>
 						) : status.sleepGuard === "failed" ? (
 							<Chip icon="moon" tone="warn" onClick={() => void retrySleepGuard()}>
 								Sleep block failed · Retry
@@ -765,7 +695,7 @@ export function Focus({
 					) : null}
 					<StopTime settings={settings} status={status} now={now} index={1} />
 					{!status.enabled ? (
-						<span className="animate-swap text-[11.5px] text-ink-3" style={{ ["--d" as string]: "300ms" }}>
+						<span className="animate-swap min-w-0 truncate text-[11.5px] text-ink-3" style={{ ["--d" as string]: "300ms" }}>
 							{settings.preventSystemSleep
 								? "Blocks system sleep while running"
 								: "Keeps the display awake while running"}

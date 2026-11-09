@@ -13,8 +13,6 @@ import type { NotifyPermission, ThemePref } from "../shared/types";
 
 // What a notification is about. Sent back with every response.
 export const NotifyKind = {
-	CallStarted: 1,
-	CallEnded: 2,
 	AutoStopped: 3,
 	Test: 4,
 } as const;
@@ -23,15 +21,14 @@ export type NotifyKind = (typeof NotifyKind)[keyof typeof NotifyKind];
 // Button codes. 0 means the notification body itself was clicked.
 export const NotifyAction = {
 	Open: 0,
-	EndSession: 1,
-	KeepRunning: 2,
-	StopSession: 3,
 } as const;
 export type NotifyAction = (typeof NotifyAction)[keyof typeof NotifyAction];
 
 export type NotifyHandlers = {
 	onResponse(kind: NotifyKind, action: NotifyAction): void;
 	onPermission(p: NotifyPermission): void;
+	// Some app started or stopped using the microphone (see watchMicrophone).
+	onMicChange(): void;
 };
 
 type Native = {
@@ -42,6 +39,7 @@ type Native = {
 	ft_notify_post: (id: Buffer, cat: Buffer, title: Buffer, body: Buffer, kind: number, sound: number) => void;
 	ft_notify_remove: (id: Buffer) => void;
 	ft_notify_theme: (theme: number) => void;
+	ft_mic_watch: (on: number) => number;
 };
 
 const c = (s: string) => Buffer.from(`${s}\0`, "utf8");
@@ -81,6 +79,7 @@ export function initNotifications(handlers: NotifyHandlers): NotifyPermission {
 			},
 			ft_notify_remove: { args: [FFIType.ptr], returns: FFIType.void },
 			ft_notify_theme: { args: [FFIType.i32], returns: FFIType.void },
+			ft_mic_watch: { args: [FFIType.i32], returns: FFIType.i32 },
 		});
 		callback = new JSCallback(
 			(event: number, a: number, b: number) => {
@@ -90,6 +89,8 @@ export function initNotifications(handlers: NotifyHandlers): NotifyPermission {
 					// The helper keeps "blocked" over a later "not asked yet".
 					permission = a === 3 ? "blocked" : a === 2 ? "allowed" : a === 1 ? "denied" : "unknown";
 					handlers.onPermission(permission);
+				} else if (event === 3) {
+					handlers.onMicChange();
 				}
 			},
 			{ args: [FFIType.i32, FFIType.i32, FFIType.i32], returns: FFIType.void, threadsafe: true },
@@ -102,9 +103,6 @@ export function initNotifications(handlers: NotifyHandlers): NotifyPermission {
 		}
 		native = n;
 		permission = "unknown";
-		// Button labels live here, next to the rest of the copy.
-		n.ft_notify_category(c("call"), NotifyAction.EndSession, c("End session"), NotifyAction.KeepRunning, c("Keep running"));
-		n.ft_notify_category(c("resumed"), NotifyAction.StopSession, c("Stop session"), 0, c(""));
 	} catch (err) {
 		console.error("Notification helper failed to load:", err);
 		native = null;
@@ -130,8 +128,8 @@ export type Notice = {
 	title: string;
 	body: string;
 	kind: NotifyKind;
-	// Category that sets the buttons: "call", "resumed", or none.
-	category?: "call" | "resumed";
+	// A category registered with ft_notify_category, for buttons.
+	category?: string;
 	sound?: boolean;
 };
 
@@ -147,6 +145,13 @@ export function notify(n: Notice) {
 	}
 }
 
+// Ask CoreAudio to tell us when any app starts or stops using the
+// microphone. Returns false when that isn't available (helper missing, or
+// macOS before 14.2), and the caller should poll instead.
+export function watchMicrophone(on: boolean): boolean {
+	return native ? native.ft_mic_watch(on ? 1 : 0) === 1 : false;
+}
+
 // The fallback panel follows the app's theme setting.
 export function setNotificationTheme(theme: ThemePref) {
 	native?.ft_notify_theme(theme === "dark" ? 1 : theme === "light" ? 2 : 0);
@@ -154,8 +159,4 @@ export function setNotificationTheme(theme: ThemePref) {
 
 export function clearNotification(id: string) {
 	native?.ft_notify_remove(c(id));
-}
-
-export function hasNotificationButtons() {
-	return native != null;
 }

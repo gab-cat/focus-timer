@@ -38,8 +38,6 @@ const INITIAL_STATUS: JigglerStatus = {
 	recent: [],
 	onCall: false,
 	callApp: null,
-	callPrompt: false,
-	callHold: false,
 	notifications: "unavailable",
 };
 

@@ -10,13 +10,11 @@ import type {
 	Stats,
 	UpdatePhase,
 } from "../shared/types";
-import { atLabel, clockLabel, duration, plannedStopAt } from "../shared/time";
+import { clockLabel, duration, plannedStopAt } from "../shared/time";
 import { runAction } from "./actions";
 import { CallTracker } from "./calltracker";
 import { sampleMic } from "./mic";
 import {
-	clearNotification,
-	hasNotificationButtons,
 	initNotifications,
 	notify,
 	NotifyAction,
@@ -24,6 +22,7 @@ import {
 	refreshNotificationPermission,
 	requestNotificationPermission,
 	setNotificationTheme,
+	watchMicrophone,
 } from "./notify";
 import {
 	bumpHour,
@@ -58,8 +57,13 @@ const WINDOW_SAVE_DEBOUNCE_MS = 500;
 // Same footprint as the Voice Notes app, so the two sit side by side.
 const WINDOW_WIDTH = 380;
 const WINDOW_HEIGHT = 600;
-// How often to look at the microphone while a call could matter.
-const CALL_POLL_MS = 5_000;
+// The microphone is checked when CoreAudio says it changed. Without that
+// (macOS before 14.2) we poll at CALL_POLL_MS instead. Either way a slow
+// safety check catches anything a missed event would leave stale.
+const CALL_POLL_MS = 1_000;
+const CALL_SAFETY_MS = 60_000;
+// Several apps can change mic state at once; scan once for the lot.
+const MIC_EVENT_SETTLE_MS = 150;
 
 let caffeinate: Subprocess | null = null;
 let nextTimer: ReturnType<typeof setTimeout> | null = null;
@@ -80,8 +84,6 @@ const status: JigglerStatus = {
 	recent: [],
 	onCall: false,
 	callApp: null,
-	callPrompt: false,
-	callHold: false,
 	notifications: "unavailable",
 };
 
@@ -255,47 +257,63 @@ function autoStop(at: number) {
 }
 
 // ── Calls ───────────────────────────────────────────────────────────────────
-// A call is an app using the microphone (see mic.ts). Depending on
-// settings.callMode we pause moves, and in "ask" mode offer to end the session
-// until the call is over ("call hold"), then start it again.
+// A call is an app using the microphone (see mic.ts). Unless settings.callMode
+// is "off", moves pause while it lasts and pick up again when it ends. The
+// session itself keeps running.
 
 const calls = new CallTracker();
+let callWatching = false;
 let callTimer: ReturnType<typeof setInterval> | null = null;
-// The stop time to carry into the session that restarts after a call.
-let holdStopAt: number | null = null;
-// Start time of a session we restarted after a call, so "Stop session" on that
-// notification can't end a later session.
-let resumedSessionAt: number | null = null;
+// One-shot: the moment a pending start or end can fire, or a settled event.
+let callCheck: ReturnType<typeof setTimeout> | null = null;
 
 function syncCallWatch() {
-	const want = (status.enabled && settings.callMode !== "off") || status.callHold;
-	if (want && !callTimer) {
-		callTimer = setInterval(pollCall, CALL_POLL_MS);
-	} else if (!want && callTimer) {
-		clearInterval(callTimer);
+	const want = status.enabled && settings.callMode !== "off";
+	if (want && !callWatching) {
+		callWatching = true;
+		const evented = watchMicrophone(true);
+		callTimer = setInterval(pollCall, evented ? CALL_SAFETY_MS : CALL_POLL_MS);
+	} else if (!want && callWatching) {
+		callWatching = false;
+		watchMicrophone(false);
+		if (callTimer) clearInterval(callTimer);
+		if (callCheck) clearTimeout(callCheck);
 		callTimer = null;
+		callCheck = null;
 		calls.reset();
 		status.onCall = false;
 		status.callApp = null;
 	}
 }
 
+function checkCallSoon(ms: number) {
+	if (callCheck) clearTimeout(callCheck);
+	callCheck = setTimeout(() => {
+		callCheck = null;
+		pollCall();
+	}, ms);
+}
+
+function onMicChange() {
+	if (callWatching) checkCallSoon(MIC_EVENT_SETTLE_MS);
+}
+
 function pollCall() {
+	if (!callWatching) return;
 	const now = Date.now();
-	if (status.callHold && holdStopAt != null && now >= holdStopAt) {
-		expireHold(holdStopAt);
-		return;
-	}
 	const event = calls.update(now, sampleMic());
 	const changed = status.onCall !== calls.onCall || status.callApp !== calls.app;
 	status.onCall = calls.onCall;
 	status.callApp = calls.app;
+	// A start or end is waiting out its debounce: look again when it's due.
+	const pending = calls.pendingMs(now);
+	if (pending != null) checkCallSoon(pending + 50);
 	if (event === "start") onCallStarted();
 	else if (event === "end") onCallEnded();
 	else if (changed) pushStatus();
 }
 
-// Starting a session mid-call: treat the call as known so we don't ask about it.
+// Starting a session mid-call: treat the call as already known.
 function adoptOngoingCall() {
 	if (settings.callMode === "off") return;
 	const mic = sampleMic();
@@ -307,33 +325,11 @@ function adoptOngoingCall() {
 }
 
 function onCallStarted() {
-	if (!status.enabled || settings.callMode === "off") {
-		pushStatus();
-		return;
-	}
-	status.pauseReason ??= "call";
-	if (settings.callMode === "ask") {
-		status.callPrompt = true;
-		notify({
-			id: "call",
-			category: "call",
-			kind: NotifyKind.CallStarted,
-			title: status.callApp ? `On a call in ${status.callApp}` : "On a call",
-			body: hasNotificationButtons()
-				? "Moves are paused. End the session and it starts again when the call ends."
-				: "Moves are paused. Open Focus Timer to end the session until the call ends.",
-		});
-	}
+	if (status.enabled && settings.callMode !== "off") status.pauseReason ??= "call";
 	pushStatus();
 }
 
 function onCallEnded() {
-	clearNotification("call");
-	status.callPrompt = false;
-	if (status.callHold) {
-		resumeAfterCall();
-		return;
-	}
 	if (status.enabled && status.pauseReason === "call") {
 		status.pauseReason = null;
 		// A fresh wait, so the first move isn't the instant the call ends.
@@ -343,115 +339,29 @@ function onCallEnded() {
 	pushStatus();
 }
 
-function endForCall(): JigglerStatus {
-	if (!status.enabled) return { ...status };
-	holdStopAt = status.autoStopAt;
-	status.callHold = true;
-	// Keep the sleep block through the call: releasing and re-engaging it
-	// can mean two password prompts in the middle of the call.
-	setEnabled(false, { keepSleepGuard: true });
-	return { ...status };
-}
-
-function dismissCallPrompt(): JigglerStatus {
-	status.callPrompt = false;
-	clearNotification("call");
-	pushStatus();
-	return { ...status };
-}
-
-function cancelCallHold(): JigglerStatus {
-	if (!status.callHold) return { ...status };
-	status.callHold = false;
-	holdStopAt = null;
-	void requestSleepGuard(false);
-	syncCallWatch();
-	pushStatus();
-	return { ...status };
-}
-
-function resumeAfterCall() {
-	const stopAt = holdStopAt;
-	status.callHold = false;
-	holdStopAt = null;
-	setEnabled(true, { autoStopAt: stopAt });
-	resumedSessionAt = status.sessionStartedAt;
-	notify({
-		id: "resumed",
-		category: "resumed",
-		kind: NotifyKind.CallEnded,
-		title: "Session back on",
-		body: stopAt
-			? `Your call ended. It stops ${atLabel(stopAt)}.`
-			: "Your call ended. It runs until you stop it.",
-	});
-}
-
-// The stop time passed while the session was off for a call.
-function expireHold(at: number) {
-	status.callHold = false;
-	holdStopAt = null;
-	clearNotification("call");
-	void requestSleepGuard(false);
-	syncCallWatch();
-	pushStatus();
-	notify({
-		id: "auto-stop",
-		kind: NotifyKind.AutoStopped,
-		title: "Session ended",
-		body: `Reached your ${clockLabel(at)} stop time during the call. It won't start again.`,
-	});
-}
-
-function onNotificationResponse(kind: NotifyKind, action: NotifyAction) {
-	if (action === NotifyAction.Open) {
-		showWindow();
-		return;
-	}
-	if (kind === NotifyKind.CallStarted) {
-		// Ignore a stale button press once the call or session is over.
-		if (!status.enabled || !calls.onCall) return;
-		if (action === NotifyAction.EndSession) endForCall();
-		else if (action === NotifyAction.KeepRunning) dismissCallPrompt();
-	} else if (kind === NotifyKind.CallEnded && action === NotifyAction.StopSession) {
-		if (status.enabled && status.sessionStartedAt === resumedSessionAt) setEnabled(false);
-	}
+function onNotificationResponse(_kind: NotifyKind, action: NotifyAction) {
+	if (action === NotifyAction.Open) showWindow();
 }
 
 // Ask for notification permission at the first session that would use it,
 // rather than at launch with no context.
 function askForNotificationsIfNeeded() {
 	if (status.notifications !== "unknown") return;
-	if (settings.callMode === "ask" || status.autoStopAt != null) requestNotificationPermission();
+	if (status.autoStopAt != null) requestNotificationPermission();
 }
 
 // ── Session ─────────────────────────────────────────────────────────────────
 
-type SessionOpts = {
-	// Use this stop time instead of the one from settings (restart after a call).
-	autoStopAt?: number | null;
-	// Ending for a call: leave the sleep block on until the call is over.
-	keepSleepGuard?: boolean;
-};
-
-function setEnabled(enabled: boolean, opts: SessionOpts = {}): JigglerStatus {
+function setEnabled(enabled: boolean): JigglerStatus {
 	if (enabled === status.enabled) return { ...status };
 	status.enabled = enabled;
-	status.callPrompt = false;
-	clearNotification("call");
 	if (enabled) {
-		// Starting by hand replaces a pending restart.
-		status.callHold = false;
-		holdStopAt = null;
 		status.sessionStartedAt = Date.now();
 		status.actionCount = 0;
 		status.pauseReason = null;
 		status.lastRoutine = null;
 		status.recent = [];
-		status.autoStopAt =
-			opts.autoStopAt !== undefined
-				? opts.autoStopAt
-				: plannedStopAt(settings, status.sessionStartedAt);
+		status.autoStopAt = plannedStopAt(settings, status.sessionStartedAt);
 		armAutoStop();
 		startCaffeinate();
 		void requestSleepGuard(settings.preventSystemSleep);
@@ -468,7 +378,7 @@ function setEnabled(enabled: boolean, opts: SessionOpts = {}): JigglerStatus {
 		status.pauseReason = null;
 		clearAutoStop();
 		stopCaffeinate();
-		if (!opts.keepSleepGuard) void requestSleepGuard(false);
+		void requestSleepGuard(false);
 		syncCallWatch();
 		pushStatus();
 	}
@@ -494,12 +404,9 @@ function applySettingsSideEffects(prev: Settings) {
 			armAutoStop();
 			askForNotificationsIfNeeded();
 			pushStatus();
-		} else if (status.callHold) {
-			holdStopAt = plannedStopAt(settings, Date.now());
 		}
 	}
 	if (prev.callMode !== settings.callMode) {
-		if (settings.callMode !== "ask" && status.callPrompt) dismissCallPrompt();
 		if (status.enabled) {
 			if (settings.callMode === "off" && status.pauseReason === "call") {
 				status.pauseReason = null;
@@ -647,9 +554,6 @@ const rpc = BrowserView.defineRPC<JigglerRPC>({
 			getSleepHelper: () => getHelperInfo(),
 			installSleepHelper: () => installHelper(),
 			removeSleepHelper: () => removeHelper(),
-			endForCall: () => endForCall(),
-			dismissCallPrompt: () => dismissCallPrompt(),
-			cancelCallHold: () => cancelCallHold(),
 			requestNotifications: () => {
 				requestNotificationPermission();
 				return { ...status };
@@ -664,10 +568,9 @@ const rpc = BrowserView.defineRPC<JigglerRPC>({
 			sendTestNotification: () => {
 				notify({
 					id: "test",
-					category: "call",
 					kind: NotifyKind.Test,
-					title: "On a call in Zoom",
-					body: "This is a test. During a real call, End session ends it until the call is over.",
+					title: "Session ended",
+					body: "This is a test. You'll see this when a session reaches its stop time.",
 				});
 				return { ...status };
 			},
@@ -782,6 +685,7 @@ function showWindow() {
 
 status.notifications = initNotifications({
 	onResponse: onNotificationResponse,
+	onMicChange,
 	onPermission: (p) => {
 		if (status.notifications === p) return;
 		status.notifications = p;
@@ -813,12 +717,6 @@ setupTray(trayIconPath, {
 	},
 	setActionType: (type) => {
 		updateSettings({ actionType: type });
-	},
-	endForCall: () => {
-		endForCall();
-	},
-	cancelCallHold: () => {
-		cancelCallHold();
 	},
 	showWindow,
 	quit: () => {

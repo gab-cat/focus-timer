@@ -5,11 +5,10 @@ export const ACTION_TYPES: ActionType[] = ["cmdtab", "mouse", "scroll", "shift"]
 export type ThemePref = "auto" | "dark" | "light";
 export type PauseReason = null | "battery" | "call" | "lock";
 // What happens when a call starts mid-session (a call = an app using the mic).
-// ask: pause moves and send a notification offering to end the session; if
-//      ended, it starts again when the call ends.
-// pause: pause moves until the call ends. off: calls change nothing.
-export type CallMode = "ask" | "pause" | "off";
-export const CALL_MODES: CallMode[] = ["ask", "pause", "off"];
+// pause: pause moves until the call ends; the session keeps running.
+// off: calls change nothing.
+export type CallMode = "pause" | "off";
+export const CALL_MODES: CallMode[] = ["pause", "off"];
 // unavailable: the native notification helper didn't load (dev without it).
 // blocked: macOS refused to ask, because the build isn't developer-signed.
 export type NotifyPermission = "unknown" | "allowed" | "denied" | "blocked" | "unavailable";
@@ -43,7 +42,7 @@ export const DEFAULT_SETTINGS: Settings = {
 	idleThresholdMs: 2 * 60 * 1000,
 	actionType: "cmdtab",
 	pauseOnBattery: false,
-	callMode: "ask",
+	callMode: "pause",
 	pauseOnLock: true,
 	autoStopMs: null,
 	autoStopTime: null,
@@ -82,10 +81,6 @@ export type JigglerStatus = {
 	onCall: boolean;
 	// The app using the microphone, when known ("Microsoft Teams").
 	callApp: string | null;
-	// Asking whether to end the session for this call.
-	callPrompt: boolean;
-	// The session was ended for a call and starts again when the call ends.
-	callHold: boolean;
 	notifications: NotifyPermission;
 };
 
@@ -133,12 +128,6 @@ export type JigglerRPC = {
 			getSleepHelper: { params: {}; response: SleepHelperInfo };
 			installSleepHelper: { params: {}; response: SleepHelperInfo };
 			removeSleepHelper: { params: {}; response: SleepHelperInfo };
-			// End the session for the current call; it restarts when the call ends.
-			endForCall: { params: {}; response: JigglerStatus };
-			// Keep the session running through this call and stop asking.
-			dismissCallPrompt: { params: {}; response: JigglerStatus };
-			// Don't restart the session when the call ends.
-			cancelCallHold: { params: {}; response: JigglerStatus };
 			requestNotifications: { params: {}; response: JigglerStatus };
 			openNotificationSettings: { params: {}; response: void };
 			sendTestNotification: { params: {}; response: JigglerStatus };

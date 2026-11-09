@@ -7,8 +7,6 @@ export type TrayActions = {
 	toggleEnabled(): void;
 	triggerNow(): void;
 	setActionType(type: Settings["actionType"]): void;
-	endForCall(): void;
-	cancelCallHold(): void;
 	showWindow(): void;
 	quit(): void;
 };
@@ -20,7 +18,6 @@ let actions: TrayActions | null = null;
 const clock = new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit" });
 
 function statusLine(status: JigglerStatus): string {
-	if (status.callHold) return "Off for a call · starts again after";
 	if (status.pauseReason) {
 		const map: Record<NonNullable<JigglerStatus["pauseReason"]>, string> = {
 			battery: "Paused · on battery",
@@ -53,17 +50,9 @@ function buildMenu(status: JigglerStatus, settings: Settings): Item[] {
 	if (status.enabled && status.autoStopAt) {
 		info.push({ type: "normal", label: `Stops ${atLabel(status.autoStopAt)}`, enabled: false });
 	}
-	const call: Item[] = [];
-	if (status.enabled && status.callPrompt) {
-		call.push({ type: "normal", label: "End session for this call", action: "end-for-call" });
-	}
-	if (status.callHold) {
-		call.push({ type: "normal", label: "Don't start again after the call", action: "cancel-hold" });
-	}
 	return [
 		...info,
 		{ type: "divider" },
-		...call,
 		{
 			type: "normal",
 			label: status.enabled ? "End session" : "Start session",
@@ -95,8 +84,6 @@ export function setupTray(imagePath: string, handlers: TrayActions) {
 		if (!action || !actions) return;
 		if (action === "toggle") actions.toggleEnabled();
 		else if (action === "trigger") actions.triggerNow();
-		else if (action === "end-for-call") actions.endForCall();
-		else if (action === "cancel-hold") actions.cancelCallHold();
 		else if (action === "show") actions.showWindow();
 		else if (action === "quit") actions.quit();
 		else if (action.startsWith("action:")) {

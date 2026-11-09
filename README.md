@@ -13,7 +13,7 @@ Focus Timer is built with Electrobun, Bun, React, Vite, and Tailwind CSS. It pro
 - Optionally blocks system sleep entirely (`pmset -a disablesleep 1`) for the session, even with the lid closed, and restores it afterwards, including after a crash
 - Four actions: ⌘-Tab (default), Mouse only, Scroll, Shift tap
 - Acts only once you've been idle for a while, and pauses when the screen is locked, you're on a call, or (optionally) on battery
-- **Calls**: notices a call when any app uses the microphone (Zoom, Teams, FaceTime, Slack, Meet in a browser). Moves pause, and a notification offers **End session**; if you end it, the session starts again when the call ends, keeping its stop time
+- **Calls**: notices a call when any app uses the microphone (Zoom, Teams, FaceTime, Slack, Meet in a browser). Moves pause within a few seconds and pick up again when the call ends. The session keeps running
 - **Auto-stop**: end a session after a set time (30m, 1h, 2h, 4h or any number of minutes) or at a clock time like 6:30 PM. The Focus screen shows when it will stop before you start
 - **Insights**: today / 7-day / all-time totals, a 7×24 heatmap of when it moved, and the action mix
 - Runs periodic refresh cycles at randomized intervals
@@ -72,13 +72,11 @@ If the app quits unexpectedly mid-session, the next launch restores normal sleep
 
 ## Calls
 
-A call is any app using the microphone for more than 10 seconds, read from CoreAudio (the same signal as the orange microphone dot). It ends after 30 seconds of quiet. Siri, dictation and Voice Control are ignored. **Settings → Calls → When a call starts** has three modes:
+A call is any app using the microphone for 2 seconds, read from CoreAudio (the same signal as the orange microphone dot). It ends after 5 seconds of quiet. Nothing polls: during a session the native helper listens for CoreAudio's own change notices (an input device starting or stopping, an app opening audio), and the app scans only when one arrives, plus one safety check a minute. Before macOS 14.2 it checks once a second instead. Siri, dictation and Voice Control are ignored. While a call lasts, moves pause. The session, its stop time and the sleep block carry on, and moves pick up again when the call ends. Turn it off under **Settings → Pause when → On a call**.
 
-- **Ask** (default): moves pause and a notification offers **End session** or **Keep running**. If you end it, the session starts again when the call ends, with the same stop time. The sleep block stays on in between, so no password prompt appears mid-call.
-- **Pause**: moves pause until the call ends.
-- **Off**: calls change nothing.
+## Notifications
 
-The notification buttons come from a small native library, `native/notify.m`, built by `bun run native` (Xcode Command Line Tools) and bundled at `Resources/app/native/libftnotify.dylib`. Without it, the app falls back to plain notifications and the prompt shows in the window and the menu bar menu.
+The auto-stop notice comes from a small native library, `native/notify.m`, built by `bun run native` (Xcode Command Line Tools) and bundled at `Resources/app/native/libftnotify.dylib`. Without it, the app falls back to plain notifications.
 
 When macOS won't deliver notifications, the same library shows each notice as a small floating panel in the top-right corner, with the same buttons. That happens when notifications are turned off in System Settings, and always on ad-hoc signed builds: macOS refuses to even ask for permission unless the app is signed with an Apple Developer ID. The panel never takes focus, shows over full-screen apps and follows the app's theme.
 
@@ -88,7 +86,7 @@ When macOS won't deliver notifications, the same library shows each notice as a 
 | --- | --- | --- |
 | Accessibility | Posting mouse, scroll and key events | First session |
 | Administrator (once, optional) | `pmset disablesleep` | Session start, or once with **Skip the password** |
-| Notifications (optional) | The call prompt and the auto-stop notice. Without it they show in a small panel instead | First session, or **Settings → Calls → Allow**. Developer ID builds only |
+| Notifications (optional) | The auto-stop notice. Without it, it shows in a small panel instead | First session with a stop time, or **Settings → Auto-stop → Allow**. Developer ID builds only |
 
 ## Troubleshooting
 
@@ -155,7 +153,6 @@ The React view talks to the Bun process through Electrobun RPC:
 - `setEnabled` starts or stops a session
 - `getStatus` reads the current session state
 - `triggerNow` runs a manual refresh
-- `endForCall`, `dismissCallPrompt` and `cancelCallHold` answer the call prompt
 - `statusChanged` pushes updates back to the UI
 
 In development, the app attempts to load the Vite dev server from `http://localhost:5173`. If the dev server is not running, it falls back to the bundled `views://mainview/index.html` asset.

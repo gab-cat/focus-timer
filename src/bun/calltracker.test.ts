@@ -18,9 +18,10 @@ describe("CallTracker", () => {
 	test("short mic use (dictation) never starts a call", () => {
 		const t = new CallTracker();
 		t.update(0, on);
-		t.update(5000, on);
-		expect(t.update(8000, off)).toBeNull();
-		expect(t.update(12_000, on)).toBeNull();
+		t.update(CALL_START_MS - 500, on);
+		expect(t.update(CALL_START_MS - 100, off)).toBeNull();
+		// Mic back on: the wait starts over rather than counting the gap.
+		expect(t.update(CALL_START_MS + 500, on)).toBeNull();
 		expect(t.onCall).toBe(false);
 	});
 
@@ -30,7 +31,7 @@ describe("CallTracker", () => {
 		t.update(CALL_START_MS, on);
 		const s = CALL_START_MS;
 		expect(t.update(s + 1000, off)).toBeNull();
-		expect(t.update(s + 20_000, on)).toBeNull(); // rejoined
+		expect(t.update(s + 1000 + CALL_END_MS - 1, on)).toBeNull(); // rejoined
 		expect(t.update(s + 21_000, off)).toBeNull();
 		expect(t.update(s + 21_000 + CALL_END_MS - 1, off)).toBeNull();
 		expect(t.update(s + 21_000 + CALL_END_MS, off)).toBe("end");
@@ -45,6 +46,18 @@ describe("CallTracker", () => {
 		expect(t.update(CALL_START_MS * 3, on)).toBeNull();
 		t.update(100_000, off);
 		expect(t.update(100_000 + CALL_END_MS, off)).toBe("end");
+	});
+
+	test("pendingMs says when a pending start or end is due", () => {
+		const t = new CallTracker();
+		expect(t.pendingMs(0)).toBeNull();
+		t.update(0, on);
+		expect(t.pendingMs(500)).toBe(CALL_START_MS - 500);
+		t.update(CALL_START_MS, on);
+		expect(t.pendingMs(CALL_START_MS)).toBeNull(); // on a call, mic still busy
+		t.update(CALL_START_MS + 1000, off);
+		expect(t.pendingMs(CALL_START_MS + 1000)).toBe(CALL_END_MS);
+		expect(t.pendingMs(CALL_START_MS + 1000 + CALL_END_MS + 10)).toBe(0);
 	});
 
 	test("keeps the last known app name when a sample has none", () => {

@@ -15,9 +15,14 @@
 // same buttons and reports presses through the same callback, so Bun doesn't
 // need to know which one the user saw.
 //
+// It also watches the microphone for src/bun/index.ts: CoreAudio tells us
+// when mic use may have changed, so Bun only scans then instead of polling
+// (see "Microphone" below).
+//
 // Build: scripts/build-native.ts (clang, no Xcode project).
 
 #import <AppKit/AppKit.h>
+#import <CoreAudio/CoreAudio.h>
 #import <Foundation/Foundation.h>
 #import <QuartzCore/QuartzCore.h>
 #import <UserNotifications/UserNotifications.h>
@@ -26,6 +31,8 @@
 //          b = action code (0 = the notification itself was clicked).
 // event 2: permission. a = 0 not asked yet, 1 denied, 2 allowed,
 //          3 blocked (macOS refused to ask: the app isn't developer-signed).
+// event 3: some app started or stopped using the microphone (no payload;
+//          Bun scans to find out which).
 typedef void (*FTCallback)(int32_t event, int32_t a, int32_t b);
 
 static FTCallback gCallback = NULL;
@@ -633,4 +640,103 @@ void ft_notify_theme(int32_t theme) {
 		gTheme = theme;
 		for (FTPanel *p in gPanels) p.appearance = panelAppearance();
 	});
+}
+
+// ── Microphone ──────────────────────────────────────────────────────────────
+// Sends event 3 whenever mic use might have changed, so Bun scans only then.
+// Signals, all pushed by CoreAudio with no polling:
+// - an input device starts or stops running for any app (fires within ~50ms);
+// - the list of audio client processes changes (an app opens audio);
+// - devices are added or removed (a headset plugged in), which also re-syncs
+//   the device listeners.
+// macOS also has a per-process "is running input" flag, but it never sends
+// change notifications, so it's only read when Bun scans (src/bun/mic.ts).
+// Listeners run on their own serial queue; nothing runs while the mic is idle.
+
+static const AudioObjectPropertyAddress kProcessList = {
+	'prs#', // kAudioHardwarePropertyProcessObjectList (macOS 14.2+)
+	kAudioObjectPropertyScopeGlobal,
+	kAudioObjectPropertyElementMain,
+};
+static const AudioObjectPropertyAddress kDeviceList = {
+	kAudioHardwarePropertyDevices,
+	kAudioObjectPropertyScopeGlobal,
+	kAudioObjectPropertyElementMain,
+};
+static const AudioObjectPropertyAddress kDeviceRunning = {
+	kAudioDevicePropertyDeviceIsRunningSomewhere,
+	kAudioObjectPropertyScopeGlobal,
+	kAudioObjectPropertyElementMain,
+};
+static const AudioObjectPropertyAddress kInputStreams = {
+	kAudioDevicePropertyStreams,
+	kAudioObjectPropertyScopeInput,
+	kAudioObjectPropertyElementMain,
+};
+
+static dispatch_queue_t gMicQueue = nil;
+static AudioObjectPropertyListenerBlock gMicChanged = nil;
+static AudioObjectPropertyListenerBlock gDevicesChanged = nil;
+static NSMutableSet<NSNumber *> *gWatchedDevices = nil;
+static BOOL gMicOn = NO;
+
+// On gMicQueue: listen to input devices that appeared, drop ones that left.
+static void syncDeviceListeners(void) {
+	UInt32 size = 0;
+	if (AudioObjectGetPropertyDataSize(kAudioObjectSystemObject, &kDeviceList, 0, NULL, &size) != noErr) return;
+	NSMutableData *buf = [NSMutableData dataWithLength:MAX(size, sizeof(AudioObjectID))];
+	if (AudioObjectGetPropertyData(kAudioObjectSystemObject, &kDeviceList, 0, NULL, &size, buf.mutableBytes) != noErr)
+		return;
+	const AudioObjectID *ids = buf.bytes;
+	NSMutableSet<NSNumber *> *now = [NSMutableSet set];
+	for (UInt32 i = 0; i < size / sizeof(AudioObjectID); i++) {
+		UInt32 streams = 0;
+		// Output-only devices would fire for every sound played; skip them.
+		if (AudioObjectGetPropertyDataSize(ids[i], &kInputStreams, 0, NULL, &streams) != noErr || streams == 0) continue;
+		NSNumber *dev = @(ids[i]);
+		[now addObject:dev];
+		if (![gWatchedDevices containsObject:dev])
+			AudioObjectAddPropertyListenerBlock(ids[i], &kDeviceRunning, gMicQueue, gMicChanged);
+	}
+	for (NSNumber *dev in gWatchedDevices) {
+		// Usually already gone with the device; the error doesn't matter.
+		if (![now containsObject:dev])
+			AudioObjectRemovePropertyListenerBlock(dev.unsignedIntValue, &kDeviceRunning, gMicQueue, gMicChanged);
+	}
+	gWatchedDevices = now;
+}
+
+// 1 = watching (or stopped), 0 = not supported here, so Bun should poll.
+int32_t ft_mic_watch(int32_t on) {
+	UInt32 size = 0;
+	// Without per-process objects Bun can't tell who holds the mic; it polls
+	// the default device instead.
+	if (AudioObjectGetPropertyDataSize(kAudioObjectSystemObject, &kProcessList, 0, NULL, &size) != noErr) return 0;
+	if (!gMicQueue) {
+		gMicQueue = dispatch_queue_create("focustimer.mic", DISPATCH_QUEUE_SERIAL);
+		gMicChanged = ^(UInt32 n, const AudioObjectPropertyAddress *addrs) {
+			emit(3, 0, 0);
+		};
+		gDevicesChanged = ^(UInt32 n, const AudioObjectPropertyAddress *addrs) {
+			syncDeviceListeners();
+			emit(3, 0, 0);
+		};
+	}
+	dispatch_async(gMicQueue, ^{
+		if (on && !gMicOn) {
+			gMicOn = YES;
+			gWatchedDevices = [NSMutableSet set];
+			AudioObjectAddPropertyListenerBlock(kAudioObjectSystemObject, &kProcessList, gMicQueue, gMicChanged);
+			AudioObjectAddPropertyListenerBlock(kAudioObjectSystemObject, &kDeviceList, gMicQueue, gDevicesChanged);
+			syncDeviceListeners();
+		} else if (!on && gMicOn) {
+			gMicOn = NO;
+			AudioObjectRemovePropertyListenerBlock(kAudioObjectSystemObject, &kProcessList, gMicQueue, gMicChanged);
+			AudioObjectRemovePropertyListenerBlock(kAudioObjectSystemObject, &kDeviceList, gMicQueue, gDevicesChanged);
+			for (NSNumber *dev in gWatchedDevices)
+				AudioObjectRemovePropertyListenerBlock(dev.unsignedIntValue, &kDeviceRunning, gMicQueue, gMicChanged);
+			gWatchedDevices = nil;
+		}
+	});
+	return 1;
 }

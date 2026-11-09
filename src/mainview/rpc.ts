@@ -118,18 +118,6 @@ export async function removeSleepHelper(): Promise<SleepHelperInfo> {
 	return electroview.rpc!.request.removeSleepHelper({});
 }
 
-export async function endForCall(): Promise<JigglerStatus> {
-	return electroview.rpc!.request.endForCall({});
-}
-
-export async function dismissCallPrompt(): Promise<JigglerStatus> {
-	return electroview.rpc!.request.dismissCallPrompt({});
-}
-
-export async function cancelCallHold(): Promise<JigglerStatus> {
-	return electroview.rpc!.request.cancelCallHold({});
-}
-
 export async function requestNotifications(): Promise<JigglerStatus> {
 	return electroview.rpc!.request.requestNotifications({});
 }

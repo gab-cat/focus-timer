@@ -79,7 +79,7 @@ export function sanitizeSettings(input: unknown): Settings {
 	// Before 1.5 calls were a pauseOnCall switch that fired whenever Zoom or
 	// Teams was merely open, so many people turned it off. Detection now uses
 	// the microphone, so that old value doesn't carry over: everyone starts on
-	// the default.
+	// the default. 1.5's "ask" mode (offer to end the session) became "pause".
 	if (!CALL_MODES.includes(out.callMode)) out.callMode = DEFAULT_SETTINGS.callMode;
 	// Auto-stop: a positive duration up to 24h, or a valid "HH:MM", never both.
 	const ms = out.autoStopMs;

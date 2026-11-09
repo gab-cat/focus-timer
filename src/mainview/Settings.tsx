@@ -2,7 +2,6 @@ import { useEffect, useState } from "react";
 import type {
 	ActionType,
 	AppInfo,
-	CallMode,
 	JigglerStatus,
 	Settings as SettingsType,
 	SleepHelperInfo,
@@ -141,12 +140,6 @@ function SleepHelperRow() {
 	);
 }
 
-const CALL_MODE_COPY: Record<CallMode, string> = {
-	ask: "Pauses moves and asks whether to end the session. If you end it, it starts again when the call ends.",
-	pause: "Pauses moves until the call ends. The session stays on.",
-	off: "Moves carry on during calls.",
-};
-
 function NotificationsRow({ status }: { status: JigglerStatus }) {
 	const [sent, setSent] = useState(false);
 	const [asking, setAsking] = useState(false);
@@ -162,14 +155,14 @@ function NotificationsRow({ status }: { status: JigglerStatus }) {
 	const p = status.notifications;
 	const description =
 		p === "allowed"
-			? "Allowed. The call prompt has End session and Keep running buttons."
+			? "Allowed. You get one when a session reaches its stop time."
 			: p === "denied"
-				? "Turned off in System Settings. Prompts show in a small panel at the top right instead."
+				? "Turned off in System Settings. The stop notice shows in a small panel at the top right instead."
 				: p === "unknown"
-					? "macOS asks the first time a session starts. You can allow them now."
+					? "macOS asks the first time a session with a stop time starts. You can allow them now."
 					: p === "blocked"
-						? "macOS won't send notifications for this build. Prompts show in a small panel at the top right instead."
-						: "Not available in this build. The call prompt shows in this window instead.";
+						? "macOS won't send notifications for this build. The stop notice shows in a small panel at the top right instead."
+						: "Not available in this build.";
 
 	let control: React.ReactNode = null;
 	if (p === "allowed" || p === "blocked") {
@@ -343,28 +336,21 @@ export function Settings({
 					title="On battery"
 					control={<Toggle label="Pause on battery" value={settings.pauseOnBattery} onChange={(v) => patch({ pauseOnBattery: v })} />}
 				/>
-			</Section>
-
-			<Section title="Calls" hint="Any app using the microphone" index={3}>
-				<Row icon="phone" title="When a call starts" description={CALL_MODE_COPY[settings.callMode]}>
-					<div className="mt-3 pl-7">
-						<Segmented
-							size="sm"
-							label="When a call starts"
-							value={settings.callMode}
-							onChange={(v) => patch({ callMode: v })}
-							options={[
-								{ value: "ask" as CallMode, label: "Ask" },
-								{ value: "pause" as CallMode, label: "Pause" },
-								{ value: "off" as CallMode, label: "Off" },
-							]}
+				<Row
+					icon="phone"
+					title="On a call"
+					description="Any app using the microphone. Moves pick up again when the call ends."
+					control={
+						<Toggle
+							label="Pause on a call"
+							value={settings.callMode === "pause"}
+							onChange={(v) => patch({ callMode: v ? "pause" : "off" })}
 						/>
-					</div>
-				</Row>
-				{settings.callMode === "ask" ? <NotificationsRow status={status} /> : null}
+					}
+				/>
 			</Section>
 
-			<Section title="Auto-stop" index={4}>
+			<Section title="Auto-stop" index={3}>
 				<Row icon="timer" title="End the session" description={stopEstimate(settings, status, Date.now())}>
 					<div className="mt-3 space-y-3 pl-7">
 						<AutoStopModePicker settings={settings} />
@@ -375,9 +361,10 @@ export function Settings({
 						) : null}
 					</div>
 				</Row>
+				{settings.autoStopMs || settings.autoStopTime ? <NotificationsRow status={status} /> : null}
 			</Section>
 
-			<Section title="Keep awake" index={5}>
+			<Section title="Keep awake" index={4}>
 				<Row
 					icon="moon"
 					title="Block system sleep"
@@ -393,7 +380,7 @@ export function Settings({
 				{settings.preventSystemSleep ? <SleepHelperRow /> : null}
 			</Section>
 
-			<Section title="General" index={6}>
+			<Section title="General" index={5}>
 				<Row
 					title="Appearance"
 					control={

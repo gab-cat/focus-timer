@@ -10,11 +10,12 @@ describe("sanitizeSettings", () => {
 	test("pre-1.5 pauseOnCall is replaced by the default call mode", () => {
 		// The old switch fired whenever a call app was open, so "off" was a
 		// workaround, not a preference about calls.
-		expect(sanitizeSettings({ pauseOnCall: true }).callMode).toBe("ask");
-		expect(sanitizeSettings({ pauseOnCall: false }).callMode).toBe("ask");
+		expect(sanitizeSettings({ pauseOnCall: true }).callMode).toBe("pause");
+		expect(sanitizeSettings({ pauseOnCall: false }).callMode).toBe("pause");
+		expect(sanitizeSettings({ callMode: "ask" }).callMode).toBe("pause");
 		expect(sanitizeSettings({ callMode: "pause" }).callMode).toBe("pause");
 		expect(sanitizeSettings({ callMode: "off" }).callMode).toBe("off");
-		expect(sanitizeSettings({ callMode: "nope" }).callMode).toBe("ask");
+		expect(sanitizeSettings({ callMode: "nope" }).callMode).toBe("pause");
 	});
 
 	test("keeps an existing auto-stop duration", () => {
